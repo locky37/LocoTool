@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 /LocoTool/config.json
 /.obsidian
+/LocoTool/glossary.json
+/LocoTool/Properties/launchSettings.json
+/LocoTool/input.txt
