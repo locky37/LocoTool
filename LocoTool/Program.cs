@@ -1,22 +1,10 @@
-﻿// Program.cs
-using CSnakes.Runtime;
+﻿using CSnakes.Runtime;
 using LocoTool.Config;
 using LocoTool.Service;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
 using System.Text;
-using System.Text.Json;
-// CSnakes: доступ к Python-модулю py/loctool.py
-//using LocTool.py;
-
-// Наши вспомогательные классы (из других файлов проекта)
-//using static RestTranslateClient; // для DTO-шек если нужно
 
 namespace LocoTool;
 
@@ -46,10 +34,12 @@ class Program
             return 0;
         }
 
+
         // CLI опции
         string? configPath = GetOptionValue(args, "--config");
         string? glossaryPathOverride = GetOptionValue(args, "--glossary");
         bool applyEmpty = args.Any(a => a.Equals("--apply-empty", StringComparison.OrdinalIgnoreCase));
+        bool hasPrice = TryParsePricePerMillion(args, out var pricePerMillion);
 
         AppConfig config;
         try
@@ -72,6 +62,15 @@ class Program
         {
             switch (cmd)
             {
+                case "stats":
+                    {
+                        // LocTool stats <strings.tsv|csv|hash> [--delimiter ...] [--price ...]
+                        string tableIn = args.Length > 1 ? args[1] : "strings.tsv";
+                        char delim = ResolveDelimiter(args, defaultDelim: '#');
+                        var (totalChars, stringsCount) = ComputeStatsFromTable(tableIn, delim);
+                        PrintCostEstimation(totalChars, stringsCount, config.Limits.MaxCharsPerRequest, hasPrice ? pricePerMillion : null);
+                        return 0;
+                    }
                 case "extract":
                     {
                         // LocTool extract <input.txt> <strings.tsv>
@@ -89,9 +88,14 @@ class Program
 
                 case "translate":
                     {
-                        // LocTool translate <strings_in.tsv|csv> <strings_out.tsv|csv> [--glossary path.json] [--config path]
+                        // ... существующий код translate ...
                         string tableIn = args.Length > 1 ? args[1] : "strings.tsv";
                         string tableOut = args.Length > 2 ? args[2] : "strings_out.tsv";
+                        char delim = ResolveDelimiter(args, defaultDelim: '#');
+
+                        // ДО перевода — посчитаем и выведем оценку
+                        var (totalChars, stringsCount) = ComputeStatsFromTable(tableIn, delim);
+                        PrintCostEstimation(totalChars, stringsCount, config.Limits.MaxCharsPerRequest, hasPrice ? pricePerMillion : null);
 
                         var glossary = GlossaryLoader.Load(glossaryPathOverride ?? config.Yandex.GlossaryPath);
                         glossary = EnforceGlossaryLimit(glossary, config.Limits.MaxGlossaryPairs);
@@ -104,7 +108,6 @@ class Program
                             config.Yandex.DefaultTargetLang, config.Yandex.DefaultSourceLang,
                             config.Limits.MaxCharsPerRequest
                         );
-
                         Console.WriteLine($"[translate] OK -> {tableOut}");
                         return 0;
                     }
@@ -128,16 +131,19 @@ class Program
 
                 case "all":
                     {
-                        // LocTool all <input.txt> <output.txt> [--glossary path.json] [--config path]
+                        // ... существующий код all ...
                         string inputPath = args.Length > 1 ? args[1] : defaultInput;
                         string outputPath = args.Length > 2 ? args[2] : defaultOutput;
 
                         string input = File.ReadAllText(inputPath, Encoding.UTF8);
 
-                        // 1) extract
-                        string tsv = loctool.ExtractStrings(input);
+                        // 1) extract (генерим TSV в памяти)
+                        string tsv = loctool.ExtractStrings(input); // если делал параметр delimiter — прокинь тут ResolveDelimiter(...)
 
-                        // 2) translate (in-memory)
+                        // ДО перевода — посчитаем и выведем оценку
+                        var (totalChars, stringsCount) = ComputeStatsFromTsvText(tsv);
+                        PrintCostEstimation(totalChars, stringsCount, config.Limits.MaxCharsPerRequest, hasPrice ? pricePerMillion : null);
+
                         var glossary = GlossaryLoader.Load(glossaryPathOverride ?? config.Yandex.GlossaryPath);
                         glossary = EnforceGlossaryLimit(glossary, config.Limits.MaxGlossaryPairs);
 
@@ -150,7 +156,6 @@ class Program
                             config.Limits.MaxCharsPerRequest
                         );
 
-                        // 3) apply
                         string outputText = loctool.ApplyTranslations(input, tsvTranslated, applyEmpty: false);
                         File.WriteAllText(outputPath, outputText, Encoding.UTF8);
 
@@ -324,7 +329,7 @@ class Program
 
     // ====================== Утилиты CSV/TSV и глоссарий ======================
 
-    static char DetectDelimiter(string header) => header.Contains('\t') ? '\t' : ',';
+    //static char DetectDelimiter(string header) => header.Contains('\t') ? '\t' : ',';
 
     record Row(int OriginalLineNo, int FieldIndex, string OrigText, string TranslatedText);
 
@@ -425,19 +430,91 @@ class Program
         };
     }
 
+    static bool TryParsePricePerMillion(string[] args, out double pricePerMillion)
+    {
+        pricePerMillion = 0;
+        var val = GetOptionValue(args, "--price") ?? GetOptionValue(args, "--price-per-million");
+        if (string.IsNullOrWhiteSpace(val)) return false;
+        // Допускаем "250", "250.5", "250,5"
+        if (double.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out pricePerMillion)) return true;
+        if (double.TryParse(val, NumberStyles.Float, new CultureInfo("ru-RU"), out pricePerMillion)) return true;
+        return false;
+    }
+
+    static (long totalChars, int stringsCount) ComputeStatsFromTable(string tablePath, char delim)
+    {
+        long total = 0;
+        int cnt = 0;
+        foreach (var r in ReadRows(tablePath, delim))
+        {
+            // учитываем ТОЛЬКО те строки, у которых есть исходный текст и пустой перевод
+            if (!string.IsNullOrWhiteSpace(r.OrigText) && string.IsNullOrWhiteSpace(r.TranslatedText))
+            {
+                total += r.OrigText.Length;
+                cnt++;
+            }
+        }
+        return (total, cnt);
+    }
+
+    static (long totalChars, int stringsCount) ComputeStatsFromTsvText(string tsv)
+    {
+        var lines = tsv.Split('\n');
+        if (lines.Length == 0) return (0, 0);
+
+        var header = lines[0].TrimEnd('\r').Split('\t');
+        int idxOrig = Array.FindIndex(header, h => h == "orig_text");
+        int idxTrans = Array.FindIndex(header, h => h == "translated_text");
+
+        long total = 0;
+        int cnt = 0;
+
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var l = lines[i].TrimEnd('\r');
+            if (string.IsNullOrWhiteSpace(l)) continue;
+            var c = l.Split('\t');
+            var orig = (idxOrig >= 0 && idxOrig < c.Length) ? c[idxOrig] : "";
+            var tran = (idxTrans >= 0 && idxTrans < c.Length) ? c[idxTrans] : "";
+            if (!string.IsNullOrWhiteSpace(orig) && string.IsNullOrWhiteSpace(tran))
+            {
+                total += orig.Length;
+                cnt++;
+            }
+        }
+        return (total, cnt);
+    }
+
+    static void PrintCostEstimation(long totalChars, int stringsCount, int maxCharsPerRequest, double? pricePerMillionOpt)
+    {
+        var batches = (int)Math.Ceiling(totalChars / (double)maxCharsPerRequest);
+        Console.WriteLine($"[stats] Строк к переводу: {stringsCount}");
+        Console.WriteLine($"[stats] Суммарно символов: {totalChars:N0}");
+        Console.WriteLine($"[stats] Батчей по {maxCharsPerRequest} симв.: {batches:N0}");
+
+        if (pricePerMillionOpt is double pricePerMillion)
+        {
+            var exactCost = (totalChars / 1_000_000.0) * pricePerMillion;
+            var paddedChars = (long)batches * maxCharsPerRequest;
+            var paddedCost = (paddedChars / 1_000_000.0) * pricePerMillion;
+
+            Console.WriteLine($"[stats] Оценка стоимости (по символам): ~{exactCost:0.00}");
+            Console.WriteLine($"[stats] Оценка с запасом (по батчам):  ~{paddedCost:0.00}  (учтено {paddedChars:N0} симв.)");
+        }
+    }
+
     static void PrintHelp()
     {
-        Console.WriteLine("LocoTool — extract / translate / apply / all");
+        Console.WriteLine("LocTool — extract / translate / apply / all / stats");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LocoTool extract <input.txt> <strings.tsv> [--config path.json]");
-        Console.WriteLine("  LocoTool translate <strings_in.tsv|csv> <strings_out.tsv|csv> [--glossary path.json] [--config path.json]");
-        Console.WriteLine("  LocoTool apply <input.txt> <strings.tsv|csv> <output.txt> [--apply-empty] [--config path.json]");
-        Console.WriteLine("  LocoTool all <input.txt> <output.txt> [--glossary path.json] [--config path.json]");
+        Console.WriteLine("  LocTool extract <input.txt> <strings.tsv> [--config path.json] [--delimiter \"#\"|\"\\t\"|\",\"]");
+        Console.WriteLine("  LocTool translate <strings_in.tsv|csv|hash> <strings_out.tsv|csv|hash> [--config path.json] [--glossary path.json] [--delimiter ...] [--price <perM>]");
+        Console.WriteLine("  LocTool apply <input.txt> <strings.tsv|csv|hash> <output.txt> [--apply-empty] [--config path.json] [--delimiter ...]");
+        Console.WriteLine("  LocTool all <input.txt> <output.txt> [--config path.json] [--glossary path.json] [--delimiter ...] [--price <perM>]");
+        Console.WriteLine("  LocTool stats <strings.tsv|csv|hash> [--config path.json] [--delimiter ...] [--price <perM>]");
         Console.WriteLine();
-        Console.WriteLine("Default config keys (config.json):");
-        Console.WriteLine("  Yandex.ApiKey / Yandex.FolderId / Yandex.DefaultSourceLang / Yandex.DefaultTargetLang / Yandex.GlossaryPath");
-        Console.WriteLine("  Limits.MaxCharsPerRequest / Limits.MaxGlossaryPairs");
-        Console.WriteLine("  Files.DefaultInput / Files.DefaultOutput");
+        Console.WriteLine("Options:");
+        Console.WriteLine("  --price, --price-per-million   Цена за 1 млн символов (вкл. НДС), например 250.00");
     }
 }
