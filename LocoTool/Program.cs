@@ -79,9 +79,11 @@ class Program
                         string tableOut = args.Length > 2 ? args[2] : "strings.tsv";
 
                         string input = File.ReadAllText(inputPath, Encoding.UTF8);
-                        string tsv = loctool.ExtractStrings(input);
-                        File.WriteAllText(tableOut, tsv, Encoding.UTF8);
-                        Console.WriteLine($"[extract] OK → {tableOut}");
+                        char delim = ResolveDelimiter(args, defaultDelim: '#');
+
+                        string table = loctool.ExtractStrings(input, delim.ToString());
+                        File.WriteAllText(tableOut, table, Encoding.UTF8);
+                        Console.WriteLine($"[extract] OK -> {tableOut}");
                         return 0;
                     }
 
@@ -103,7 +105,7 @@ class Program
                             config.Limits.MaxCharsPerRequest
                         );
 
-                        Console.WriteLine($"[translate] OK → {tableOut}");
+                        Console.WriteLine($"[translate] OK -> {tableOut}");
                         return 0;
                     }
 
@@ -120,7 +122,7 @@ class Program
                         string outputText = loctool.ApplyTranslations(input, tableText, applyEmpty);
                         File.WriteAllText(outputPath, outputText, Encoding.UTF8);
 
-                        Console.WriteLine($"[apply] OK → {outputPath}");
+                        Console.WriteLine($"[apply] OK -> {outputPath}");
                         return 0;
                     }
 
@@ -152,7 +154,7 @@ class Program
                         string outputText = loctool.ApplyTranslations(input, tsvTranslated, applyEmpty: false);
                         File.WriteAllText(outputPath, outputText, Encoding.UTF8);
 
-                        Console.WriteLine($"[all] OK → {outputPath}");
+                        Console.WriteLine($"[all] OK -> {outputPath}");
                         return 0;
                     }
 
@@ -182,7 +184,8 @@ class Program
         string? sourceLang,
         int maxCharsPerRequest)
     {
-        char delim = DetectDelimiter(File.ReadLines(tableInPath).FirstOrDefault() ?? "");
+        //char delim = DetectDelimiter(File.ReadLines(tableInPath).FirstOrDefault() ?? "");
+        char delim = ResolveDelimiter(Environment.GetCommandLineArgs(), defaultDelim: '#');
         var rows = ReadRows(tableInPath, delim).ToList();
 
         var toTranslateIdx = rows
@@ -206,7 +209,7 @@ class Program
             for (int j = 0; j < batch.Count; j++)
                 rows[batch[j]] = rows[batch[j]] with { TranslatedText = translated[j] };
 
-            Console.WriteLine($"  [translate] batch {batch.Count} strings, chars≈{sum}");
+            Console.WriteLine($"  [translate] batch {batch.Count} strings, chars: {sum}");
             batch.Clear(); sum = 0;
         }
 
@@ -328,8 +331,10 @@ class Program
     static IEnumerable<Row> ReadRows(string path, char delim)
     {
         using var sr = new StreamReader(path, Encoding.UTF8);
-        var header = (sr.ReadLine() ?? "");
-        var cols = header.Split(delim);
+
+        // читаем заголовок и определяем индексы нужных колонок
+        var headerLine = (sr.ReadLine() ?? "").TrimEnd('\r');
+        var cols = headerLine.Split(delim);
 
         int iLine = Array.FindIndex(cols, c => c.Equals("original_line_no", StringComparison.OrdinalIgnoreCase));
         int iField = Array.FindIndex(cols, c => c.Equals("field_index", StringComparison.OrdinalIgnoreCase));
@@ -337,17 +342,27 @@ class Program
         int iTrans = Array.FindIndex(cols, c => c.Equals("translated_text", StringComparison.OrdinalIgnoreCase));
 
         if (iLine < 0 || iField < 0 || iOrig < 0 || iTrans < 0)
-            throw new InvalidOperationException("В таблице должны быть колонки: original_line_no, field_index, orig_text, translated_text");
+            throw new InvalidOperationException(
+                $"В таблице должны быть колонки: original_line_no, field_index, orig_text, translated_text. " +
+                $"Найдено: {string.Join(", ", cols)}");
 
         string? line;
         while ((line = sr.ReadLine()) != null)
         {
-            var c = line.Split(delim);
+            var c = line.TrimEnd('\r').Split(delim);
+
+            // безопасно вытаскиваем ячейки (могут быть пустые / отсутствовать в конце)
+            string Get(int idx) => (idx >= 0 && idx < c.Length) ? c[idx] : "";
+
+            // парсим числа с инвариантной культурой
+            if (!int.TryParse(Get(iLine), NumberStyles.Integer, CultureInfo.InvariantCulture, out var lineNo)) continue;
+            if (!int.TryParse(Get(iField), NumberStyles.Integer, CultureInfo.InvariantCulture, out var fieldIdx)) continue;
+
             yield return new Row(
-                int.Parse(c[iLine], CultureInfo.InvariantCulture),
-                int.Parse(c[iField], CultureInfo.InvariantCulture),
-                iOrig < c.Length ? c[iOrig] : "",
-                iTrans < c.Length ? c[iTrans] : ""
+                lineNo,
+                fieldIdx,
+                Get(iOrig),
+                Get(iTrans)
             );
         }
     }
@@ -392,15 +407,33 @@ class Program
         return null;
     }
 
+    static char ResolveDelimiter(string[] args, char defaultDelim = '#')
+    {
+        var s = GetOptionValue(args, "--delimiter");   // например: "--delimiter" "#"
+        if (string.IsNullOrEmpty(s))
+            return defaultDelim;
+        return s switch
+        {
+            "\\t" => '\t',
+            "tab" => '\t',
+            "#" => '#',
+            "," => ',',
+            ";" => ';',
+            "|" => '|',
+            _ when s.Length == 1 => s[0],
+            _ => defaultDelim
+        };
+    }
+
     static void PrintHelp()
     {
-        Console.WriteLine("LocTool — extract / translate / apply / all");
+        Console.WriteLine("LocoTool — extract / translate / apply / all");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LocTool extract <input.txt> <strings.tsv> [--config path.json]");
-        Console.WriteLine("  LocTool translate <strings_in.tsv|csv> <strings_out.tsv|csv> [--glossary path.json] [--config path.json]");
-        Console.WriteLine("  LocTool apply <input.txt> <strings.tsv|csv> <output.txt> [--apply-empty] [--config path.json]");
-        Console.WriteLine("  LocTool all <input.txt> <output.txt> [--glossary path.json] [--config path.json]");
+        Console.WriteLine("  LocoTool extract <input.txt> <strings.tsv> [--config path.json]");
+        Console.WriteLine("  LocoTool translate <strings_in.tsv|csv> <strings_out.tsv|csv> [--glossary path.json] [--config path.json]");
+        Console.WriteLine("  LocoTool apply <input.txt> <strings.tsv|csv> <output.txt> [--apply-empty] [--config path.json]");
+        Console.WriteLine("  LocoTool all <input.txt> <output.txt> [--glossary path.json] [--config path.json]");
         Console.WriteLine();
         Console.WriteLine("Default config keys (config.json):");
         Console.WriteLine("  Yandex.ApiKey / Yandex.FolderId / Yandex.DefaultSourceLang / Yandex.DefaultTargetLang / Yandex.GlossaryPath");

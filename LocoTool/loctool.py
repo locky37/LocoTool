@@ -20,11 +20,12 @@ def _join_hash_preserve_trailing(fields: List[str], trailing_hash_count: int) ->
         s += '#' * trailing_hash_count
     return s
 
-def extract_strings(input_text: str) -> str:
+def extract_strings(input_text: str, delimiter: str = "#") -> str:
     """
-    Вход: полный текст исходного локализационного файла.
-    Выход: TSV-строка с колонками:
-      original_line_no	field_index	record_id_guess	orig_text	translated_text
+    Вход: полный текст исходного файла с #
+    Выход: текст таблицы с колонками
+    original_line_no, field_index, record_id_guess, orig_text, translated_text
+    Разделитель между колонками задаётся параметром delimiter.
     """
     out = []
     for line_no, raw in enumerate(input_text.splitlines(), start=1):
@@ -32,8 +33,18 @@ def extract_strings(input_text: str) -> str:
         rec_id = fields[0] if fields else ''
         for idx, val in enumerate(fields):
             if _CJK_RE.search(val):
-                out.append(f"{line_no}\t{idx}\t{(rec_id if rec_id.isdigit() else '')}\t{val}\t")
-    header = "original_line_no\tfield_index\trecord_id_guess\torig_text\ttranslated_text"
+                # формируем строку с нужным разделителем
+                out.append(
+                    delimiter.join([
+                        str(line_no),
+                        str(idx),
+                        rec_id if rec_id.isdigit() else '',
+                        val,
+                        ''
+                    ])
+                )
+
+    header = delimiter.join(["original_line_no", "field_index", "record_id_guess", "orig_text", "translated_text"])
     return header + "\n" + "\n".join(out)
 
 def apply_translations(input_text: str, table_tsv: str, apply_empty: bool=False) -> str:
