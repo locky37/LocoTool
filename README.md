@@ -1,6 +1,6 @@
 # 🧩 LocoTool — инструмент для локализации игровых / промышленных текстовых файлов
 
-**LocTool** — универсальная утилита для извлечения, перевода и обратной сборки
+**LocoTool** — универсальная утилита для извлечения, перевода и обратной сборки
 локализационных файлов, в которых строки разделены символом `#`.
 
 Проект объединяет:
@@ -34,10 +34,10 @@ dotnet build -c Release
 
 ```
 LocoTool/
- ├─ LocTool.exe
+ ├─ LocoTool.exe
  ├─ config.json
  ├─ glossary.json
- └─ loctool.py
+ └─ locotool.py
 ```
 
 ---
@@ -93,7 +93,7 @@ LocoTool/
 ### 1️⃣ Извлечение переводимых строк
 
 ```bash
-LocTool extract input.txt strings.tsv
+LocoTool extract input.txt strings.tsv
 ```
 
 Создаётся файл `strings.tsv` с колонками:
@@ -105,7 +105,7 @@ original_line_no	field_index	record_id_guess	orig_text	translated_text
 ### 2️⃣ Машинный перевод через Яндекс
 
 ```bash
-LocTool translate strings.tsv strings_out.tsv
+LocoTool translate strings.tsv strings_out.tsv
 ```
 
 `translated_text` будет автоматически заполнен английскими вариантами.
@@ -113,7 +113,7 @@ LocTool translate strings.tsv strings_out.tsv
 ### 3️⃣ Применение перевода обратно
 
 ```bash
-LocTool apply input.txt strings_out.tsv output.txt
+LocoTool apply input.txt strings_out.tsv output.txt
 ```
 
 Результат (`output.txt`) — тот же файл, но со вставленными переводами.
@@ -121,7 +121,7 @@ LocTool apply input.txt strings_out.tsv output.txt
 ### 4️⃣ Полный автоматический цикл
 
 ```bash
-LocTool all input.txt output.txt
+LocoTool all input.txt output.txt
 ```
 
 Одной командой:
