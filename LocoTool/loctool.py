@@ -47,7 +47,7 @@ def extract_strings(input_text: str, delimiter: str = "#") -> str:
     header = delimiter.join(["original_line_no", "field_index", "record_id_guess", "orig_text", "translated_text"])
     return header + "\n" + "\n".join(out)
 
-def apply_translations(input_text: str, table_tsv: str, apply_empty: bool=False) -> str:
+def apply_translations(input_text: str, table_tsv: str, apply_empty: bool=False, delimiter: str = "#") -> str:
     """
     Применяет переводы из TSV к исходному тексту и возвращает собранный файл.
     Ключи: (line_no, field_index, orig_text) + fallback (line_no, field_index).
@@ -58,12 +58,12 @@ def apply_translations(input_text: str, table_tsv: str, apply_empty: bool=False)
     lines = table_tsv.splitlines()
     if not lines:
         return input_text
-    header = lines[0].split('\t')
+    header = lines[0].split(delimiter)
     cols = {name: i for i, name in enumerate(header)}
     for row in lines[1:]:
         if not row.strip(): 
             continue
-        cells = row.split('\t')
+        cells = row.split(delimiter)
         try:
             line_no = int(cells[cols['original_line_no']])
             field_idx = int(cells[cols['field_index']])

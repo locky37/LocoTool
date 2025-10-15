@@ -119,10 +119,12 @@ class Program
                         string tablePath = args.Length > 2 ? args[2] : "strings.tsv";
                         string outputPath = args.Length > 3 ? args[3] : defaultOutput;
 
+                        char delim = ResolveDelimiter(args, defaultDelim: '#');
+
                         string input = File.ReadAllText(inputPath, Encoding.UTF8);
                         string tableText = File.ReadAllText(tablePath, Encoding.UTF8);
 
-                        string outputText = loctool.ApplyTranslations(input, tableText, applyEmpty);
+                        string outputText = loctool.ApplyTranslations(input, tableText, applyEmpty, delim.ToString());
                         File.WriteAllText(outputPath, outputText, Encoding.UTF8);
 
                         Console.WriteLine($"[apply] OK -> {outputPath}");
