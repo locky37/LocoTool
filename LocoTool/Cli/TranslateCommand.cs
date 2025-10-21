@@ -11,6 +11,9 @@ public sealed class TranslateCommand : ICommandRunner
     private readonly ITableIo _tableIo;
     private readonly IStatsService _stats;
     private readonly ITranslateClient? _client;
+    private readonly IDeduplicator _dedup = new LocoTool.Core.Services.Deduplicator();
+    private readonly IBatchPlanner _planner = new LocoTool.Core.Services.BatchPlanner();
+    private readonly IPlaceholderService _ph = new LocoTool.Core.Services.PlaceholderService();
 
     public TranslateCommand(IConfigService config, IGlossaryService glossary, ITranslateClient? client, ITableIo tableIo, IStatsService stats)
     { _config = config; _glossary = glossary; _tableIo = tableIo; _stats = stats; _client = client; }
@@ -113,30 +116,98 @@ public sealed class TranslateCommand : ICommandRunner
                 .Select(x => x.i)
                 .ToList();
 
-            var batch = new List<int>();
-            int sum = 0;
-            async Task FlushAsync()
-            {
-                if (batch.Count == 0) return;
-                var texts = batch.Select(i => rows[i].OrigText).ToArray();
-                var translated = await client.TranslateBatchAsync(texts, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang, glossary, false, cancellationToken).ConfigureAwait(false);
-                for (int j = 0; j < batch.Count; j++)
-                    rows[batch[j]] = rows[batch[j]] with { TranslatedText = translated[j] };
-                Console.WriteLine($"  [translate] batch {batch.Count} strings, chars: {sum}");
-                batch.Clear(); sum = 0;
-            }
+            // Optimization services
+            ITranslationMemory? tm = null;
+            if (context.OptUseTm || cfg.Optimization.UseTM)
+                tm = new LocoTool.Core.Services.JsonTranslationMemory(context.OptTmPath ?? cfg.Optimization.TMPath);
+            IBatchCache? cache = null;
+            if (context.OptBatchCache || cfg.Optimization.BatchCache)
+                cache = new LocoTool.Core.Services.BatchCache(Path.Combine(Path.GetDirectoryName(outputTable) ?? Environment.CurrentDirectory, "batchcache.json"));
 
+            // Build list of texts to translate, applying TM and placeholders if enabled
+            var toTranslate = new List<int>();
+            var masked = new Dictionary<int, string[]>();
             foreach (var idx in toTranslateIdx)
             {
-                var add = rows[idx].OrigText?.Length ?? 0;
-                if (sum + add > cfg.Limits.MaxCharsPerRequest)
-                    await FlushAsync();
-                batch.Add(idx);
-                sum += add;
+                var text = rows[idx].OrigText ?? string.Empty;
+                if (tm != null && tm.TryGet(text, out var cached))
+                {
+                    rows[idx] = rows[idx] with { TranslatedText = cached };
+                    continue;
+                }
+                if (context.OptPlaceholders || cfg.Optimization.Placeholders)
+                {
+                    text = _ph.Mask(text, out var phs);
+                    masked[idx] = phs;
+                    // temporarily store masked into rows? keep local only
+                }
+                toTranslate.Add(idx);
             }
-            await FlushAsync();
+
+            // Deduplicate
+            var textsToTranslate = toTranslate.Select(i => rows[i].OrigText ?? string.Empty).ToList();
+            if (context.OptPlaceholders || cfg.Optimization.Placeholders)
+            {
+                for (int k = 0; k < toTranslate.Count; k++)
+                {
+                    var idx = toTranslate[k];
+                    if (masked.TryGetValue(idx, out var phs))
+                    {
+                        textsToTranslate[k] = _ph.Mask(rows[idx].OrigText ?? string.Empty, out _); // ensure masked used
+                    }
+                }
+            }
+
+            var (unique, map) = (context.OptDedup || cfg.Optimization.Deduplicate)
+                ? _dedup.Deduplicate(textsToTranslate)
+                : (textsToTranslate, Enumerable.Range(0, textsToTranslate.Count).ToArray());
+
+            // Plan batches
+            var plannedBatches = _planner.Plan(unique, cfg.Limits.MaxCharsPerRequest);
+            foreach (var b in plannedBatches)
+            {
+                var texts = b.Select(i => unique[i]).ToArray();
+                IReadOnlyList<string> translated;
+                var key = cache != null ? LocoTool.Core.Services.BatchCache.ComputeKey(texts, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang) : null;
+                if (key != null && cache!.TryGet(key, out translated))
+                {
+                    // from cache
+                }
+                else
+                {
+                    translated = await client.TranslateBatchAsync(texts, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang, glossary, false, cancellationToken).ConfigureAwait(false);
+                    if (key != null) cache!.Put(key!, translated);
+                }
+
+                for (int j = 0; j < b.Count; j++)
+                {
+                    var uniqIdx = b[j];
+                    var translatedText = translated[j] ?? string.Empty;
+                    // propagate to all mapped originals
+                    for (int k = 0; k < map.Length; k++)
+                    {
+                        if (map[k] == uniqIdx)
+                        {
+                            var rowIndex = toTranslate[k];
+                            if (masked.TryGetValue(rowIndex, out var phs))
+                                translatedText = _ph.Unmask(translatedText, phs);
+                            rows[rowIndex] = rows[rowIndex] with { TranslatedText = translatedText };
+                            if (tm != null)
+                                tm.Add(rows[rowIndex].OrigText ?? string.Empty, translatedText);
+                        }
+                    }
+                }
+            }
+            tm?.Save();
+            cache?.Save();
 
             _tableIo.WriteRows(outputTable, delim, rows);
+            if (context.OptHumanLoop || cfg.Optimization.HumanLoop)
+            {
+                var reviewPath = Path.Combine(Path.GetDirectoryName(outputTable) ?? Environment.CurrentDirectory, "review.tsv");
+                var items = rows.Select(r => (r.OrigText ?? string.Empty, r.TranslatedText ?? string.Empty));
+                new LocoTool.Core.Services.HumanLoopService().ExportReview(reviewPath, items);
+            }
         }
 
         static (string dir, List<string> files) ResolveBatchBySelectedFile(string selectedPath)

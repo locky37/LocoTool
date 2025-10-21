@@ -15,6 +15,13 @@ public sealed class CommandContext
     public bool ApplyEmpty { get; init; }
     public double? PricePerMillion { get; init; }
     public char Delimiter { get; init; } = '#';
+    // Optimization flags
+    public bool OptDedup { get; init; }
+    public bool OptUseTm { get; init; }
+    public string? OptTmPath { get; init; }
+    public bool OptBatchCache { get; init; }
+    public bool OptPlaceholders { get; init; }
+    public bool OptHumanLoop { get; init; }
 
     public static CommandContext FromArgs(string[] args)
     {
@@ -45,8 +52,13 @@ public sealed class CommandContext
             ParserName = GetOpt("--parser"),
             ApplyEmpty = args.Any(a => a.Equals("--apply-empty", StringComparison.OrdinalIgnoreCase)),
             PricePerMillion = ppm,
-            Delimiter = delim
+            Delimiter = delim,
+            OptDedup = args.Any(a => a.Equals("--dedup", StringComparison.OrdinalIgnoreCase)),
+            OptUseTm = args.Any(a => a.Equals("--tm", StringComparison.OrdinalIgnoreCase)) || !string.IsNullOrEmpty(GetOpt("--tm")),
+            OptTmPath = GetOpt("--tm"),
+            OptBatchCache = args.Any(a => a.Equals("--batch-cache", StringComparison.OrdinalIgnoreCase)),
+            OptPlaceholders = args.Any(a => a.Equals("--placeholders", StringComparison.OrdinalIgnoreCase)),
+            OptHumanLoop = args.Any(a => a.Equals("--hl-review", StringComparison.OrdinalIgnoreCase))
         };
     }
 }
-

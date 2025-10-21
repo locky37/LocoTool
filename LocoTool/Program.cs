@@ -54,6 +54,11 @@ internal static class Program
         Console.WriteLine("Options:");
         Console.WriteLine("  --parser <name>   Имя парсера (hash, hashplus, json, xliff). Если не задан — автоопределение.");
         Console.WriteLine("  --price, --price-per-million   Цена за 1 млн символов (напр. 250.00)");
+        Console.WriteLine("  --dedup           Удаление дубликатов сегментов перед переводом");
+        Console.WriteLine("  --tm <path>       Локальная Translation Memory (cache.json)");
+        Console.WriteLine("  --batch-cache     Кэширование результатов батчей перевода");
+        Console.WriteLine("  --placeholders    Маскирование плейсхолдеров (числа) перед переводом");
+        Console.WriteLine("  --hl-review       Экспорт review.tsv (orig_text, mt_suggest, final_text)");
         Console.WriteLine();
         Console.WriteLine("Directory modes:");
         Console.WriteLine("  extract: если указан каталог как <out_dir> и --parser hashplus — создаёт множество TSV по секциям в каталоге");
