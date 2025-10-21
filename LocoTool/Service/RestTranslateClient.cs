@@ -11,8 +11,8 @@ public sealed class RestTranslateClient
     private readonly string _authHeaderValue;
     private readonly string? _folderId;
 
-    /// <param name="authHeaderValue">"Api-Key xxxxx" или "Bearer xxxxx"</param>
-    /// <param name="folderId">–екомендуетс€ передавать при работе с REST (см. quickstart).</param>
+    /// <param name="authHeaderValue">"Api-Key xxxxx" or "Bearer xxxxx"</param>
+    /// <param name="folderId">Optional folder ID if required by REST.</param>
     public RestTranslateClient(HttpClient http, string authHeaderValue, string? folderId = null)
     {
         _http = http;
@@ -27,6 +27,50 @@ public sealed class RestTranslateClient
         IEnumerable<(string src, string dst, bool exact)>? glossary = null,
         bool speller = false)
     {
+        const int MaxCharsPerRequest = 10000; // API limit: sum of all texts per request
+
+        var list = texts.ToList();
+        var totalLen = list.Sum(s => s?.Length ?? 0);
+
+        if (totalLen <= MaxCharsPerRequest)
+        {
+            return await SendOnceAsync(list, target, source, glossary, speller).ConfigureAwait(false);
+        }
+
+        // Split into multiple requests, preserving order
+        var results = new string[list.Count];
+        int start = 0;
+        while (start < list.Count)
+        {
+            int sum = 0;
+            int end = start;
+            while (end < list.Count)
+            {
+                int add = list[end]?.Length ?? 0;
+                if (sum + add > MaxCharsPerRequest && end > start) break;
+                if (sum + add > MaxCharsPerRequest && end == start) { end++; break; } // single oversize item
+                sum += add;
+                end++;
+            }
+
+            var slice = list.GetRange(start, end - start);
+            var translated = await SendOnceAsync(slice, target, source, glossary, speller).ConfigureAwait(false);
+            for (int i = 0; i < translated.Count && (start + i) < results.Length; i++)
+                results[start + i] = translated[i] ?? string.Empty;
+
+            start = end;
+        }
+
+        return results;
+    }
+
+    private async Task<IReadOnlyList<string>> SendOnceAsync(
+        IReadOnlyList<string> batch,
+        string target,
+        string? source,
+        IEnumerable<(string src, string dst, bool exact)>? glossary,
+        bool speller)
+    {
         var req = new TranslateRequest
         {
             TargetLanguageCode = target,
@@ -34,7 +78,7 @@ public sealed class RestTranslateClient
             FolderId = _folderId,
             Format = "PLAIN_TEXT",
             Speller = speller,
-            Texts = texts.ToList()
+            Texts = batch.ToList()
         };
 
         if (glossary is not null)
@@ -81,7 +125,7 @@ public sealed class RestTranslateClient
                ?? Array.Empty<string>();
     }
 
-    // ====== DTO под REST ======
+    // ====== DTO ======
 
     public sealed class TranslateRequest
     {
