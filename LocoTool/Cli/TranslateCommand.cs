@@ -10,9 +10,10 @@ public sealed class TranslateCommand : ICommandRunner
     private readonly IGlossaryService _glossary;
     private readonly ITableIo _tableIo;
     private readonly IStatsService _stats;
+    private readonly ITranslateClient? _client;
 
-    public TranslateCommand(IConfigService config, IGlossaryService glossary, ITranslateClient _ignored, ITableIo tableIo, IStatsService stats)
-    { _config = config; _glossary = glossary; _tableIo = tableIo; _stats = stats; }
+    public TranslateCommand(IConfigService config, IGlossaryService glossary, ITranslateClient? client, ITableIo tableIo, IStatsService stats)
+    { _config = config; _glossary = glossary; _tableIo = tableIo; _stats = stats; _client = client; }
 
     public string Name => "translate";
 
@@ -27,54 +28,88 @@ public sealed class TranslateCommand : ICommandRunner
         string tableOut = context.Args.Length > 2 ? context.Args[2] : "strings_out.tsv";
         char delim = context.Delimiter;
 
-        var (totalChars, stringsCount) = _stats.ComputeFromTable(tableIn, delim);
-        var (batches, exactCost, paddedCost, paddedChars) = _stats.EstimateCost(totalChars, cfg.Limits.MaxCharsPerRequest, context.PricePerMillion);
-        Console.WriteLine($"[stats] строк к переводу: {stringsCount}");
-        Console.WriteLine($"[stats] всего символов: {totalChars:N0}");
-        Console.WriteLine($"[stats] пачек по {cfg.Limits.MaxCharsPerRequest} симв.: {batches:N0}");
-        if (exactCost is not null && paddedCost is not null)
-        {
-            Console.WriteLine($"[stats] оценка (по символам): ~{exactCost:0.00}");
-            Console.WriteLine($"[stats] оценка (по пачкам):  ~{paddedCost:0.00}  (учтено {paddedChars:N0} симв.)");
-        }
-
         var glossary = _glossary.Load(context.GlossaryPath ?? cfg.Yandex.GlossaryPath);
         glossary = _glossary.EnforceLimit(glossary, cfg.Limits.MaxGlossaryPairs);
 
-        var rows = _tableIo.ReadRows(tableIn, delim).ToList();
-        var client = new LocoTool.Core.Services.RestTranslateClientAdapter(
-            () => new LocoTool.Service.RestTranslateClient(new HttpClient(), cfg.Yandex.AuthHeader, cfg.Yandex.FolderId));
-        var toTranslateIdx = rows
-            .Select((r, i) => (r, i))
-            .Where(x => !string.IsNullOrWhiteSpace(x.r.OrigText) && string.IsNullOrWhiteSpace(x.r.TranslatedText))
-            .Select(x => x.i)
-            .ToList();
-
-        var batch = new List<int>();
-        int sum = 0;
-        async Task FlushAsync()
+        if (Directory.Exists(tableIn))
         {
-            if (batch.Count == 0) return;
-            var texts = batch.Select(i => rows[i].OrigText).ToArray();
-            var translated = await client.TranslateBatchAsync(texts, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang, glossary, false, cancellationToken).ConfigureAwait(false);
-            for (int j = 0; j < batch.Count; j++)
-                rows[batch[j]] = rows[batch[j]] with { TranslatedText = translated[j] };
-            Console.WriteLine($"  [translate] batch {batch.Count} strings, chars: {sum}");
-            batch.Clear(); sum = 0;
+            var inDir = tableIn;
+            var outDir = tableOut;
+            if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
+
+            var files = Directory.EnumerateFiles(inDir, "*.tsv");
+            foreach (var file in files)
+            {
+                var outPath = Path.Combine(outDir, Path.GetFileName(file));
+                await TranslateOneAsync(file, outPath).ConfigureAwait(false);
+                Console.WriteLine($"[translate] OK -> {outPath}");
+            }
+            return 0;
+        }
+        else
+        {
+            // If output looks like directory intention, create and write inside
+            if (!File.Exists(tableIn) || string.IsNullOrEmpty(Path.GetExtension(tableOut)))
+            {
+                var outDir = tableOut;
+                Directory.CreateDirectory(outDir);
+                var outPath = Path.Combine(outDir, Path.GetFileName(tableIn));
+                await TranslateOneAsync(tableIn, outPath).ConfigureAwait(false);
+                Console.WriteLine($"[translate] OK -> {outPath}");
+                return 0;
+            }
+            await TranslateOneAsync(tableIn, tableOut).ConfigureAwait(false);
+            Console.WriteLine($"[translate] OK -> {tableOut}");
+            return 0;
         }
 
-        foreach (var idx in toTranslateIdx)
+        async Task TranslateOneAsync(string inputTable, string outputTable)
         {
-            var add = rows[idx].OrigText?.Length ?? 0;
-            if (sum + add > cfg.Limits.MaxCharsPerRequest)
-                await FlushAsync();
-            batch.Add(idx);
-            sum += add;
-        }
-        await FlushAsync();
+            var (totalChars, stringsCount) = _stats.ComputeFromTable(inputTable, delim);
+            var (batches, exactCost, paddedCost, paddedChars) = _stats.EstimateCost(totalChars, cfg.Limits.MaxCharsPerRequest, context.PricePerMillion);
+            Console.WriteLine($"[stats] строк к переводу: {stringsCount}");
+            Console.WriteLine($"[stats] всего символов: {totalChars:N0}");
+            Console.WriteLine($"[stats] пачек по {cfg.Limits.MaxCharsPerRequest} симв.: {batches:N0}");
+            if (exactCost is not null && paddedCost is not null)
+            {
+                Console.WriteLine($"[stats] оценка (по символам): ~{exactCost:0.00}");
+                Console.WriteLine($"[stats] оценка (по пачкам):  ~{paddedCost:0.00}  (учтено {paddedChars:N0} симв.)");
+            }
 
-        _tableIo.WriteRows(tableOut, delim, rows);
-        Console.WriteLine($"[translate] OK -> {tableOut}");
-        return 0;
+            var rows = _tableIo.ReadRows(inputTable, delim).ToList();
+            var client = _client ?? new LocoTool.Core.Services.RestTranslateClientAdapter(
+                () => new LocoTool.Service.RestTranslateClient(new HttpClient(), cfg.Yandex.AuthHeader, cfg.Yandex.FolderId));
+
+            var toTranslateIdx = rows
+                .Select((r, i) => (r, i))
+                .Where(x => !string.IsNullOrWhiteSpace(x.r.OrigText) && string.IsNullOrWhiteSpace(x.r.TranslatedText))
+                .Select(x => x.i)
+                .ToList();
+
+            var batch = new List<int>();
+            int sum = 0;
+            async Task FlushAsync()
+            {
+                if (batch.Count == 0) return;
+                var texts = batch.Select(i => rows[i].OrigText).ToArray();
+                var translated = await client.TranslateBatchAsync(texts, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang, glossary, false, cancellationToken).ConfigureAwait(false);
+                for (int j = 0; j < batch.Count; j++)
+                    rows[batch[j]] = rows[batch[j]] with { TranslatedText = translated[j] };
+                Console.WriteLine($"  [translate] batch {batch.Count} strings, chars: {sum}");
+                batch.Clear(); sum = 0;
+            }
+
+            foreach (var idx in toTranslateIdx)
+            {
+                var add = rows[idx].OrigText?.Length ?? 0;
+                if (sum + add > cfg.Limits.MaxCharsPerRequest)
+                    await FlushAsync();
+                batch.Add(idx);
+                sum += add;
+            }
+            await FlushAsync();
+
+            _tableIo.WriteRows(outputTable, delim, rows);
+        }
     }
 }

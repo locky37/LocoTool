@@ -26,7 +26,7 @@ public sealed class ApplyCommand : ICommandRunner
         string outputPath = context.Args.Length > 3 ? context.Args[3] : cfg.Files.DefaultOutput;
 
         string input = File.ReadAllText(inputPath, Encoding.UTF8);
-        string tableText = File.ReadAllText(tablePath, Encoding.UTF8);
+        string tableText = ReadTablePossiblyDirectory(tablePath);
         string? sample = File.Exists(inputPath) ? File.ReadLines(inputPath).FirstOrDefault() : null;
 
         try
@@ -42,8 +42,20 @@ public sealed class ApplyCommand : ICommandRunner
                 cfg.Parsers.Folder,
                 cfg.Parsers.Assemblies);
 
-            File.WriteAllText(outputPath, output, Encoding.UTF8);
-            Console.WriteLine($"[apply] OK -> {outputPath}");
+            // If output looks like directory intention, create and write inferred name
+            if (LooksLikeDirectory(outputPath))
+            {
+                Directory.CreateDirectory(outputPath);
+                var name = Path.GetFileName(inputPath);
+                var outPath = Path.Combine(outputPath, name);
+                File.WriteAllText(outPath, output, Encoding.UTF8);
+                Console.WriteLine($"[apply] OK -> {outPath}");
+            }
+            else
+            {
+                File.WriteAllText(outputPath, output, Encoding.UTF8);
+                Console.WriteLine($"[apply] OK -> {outputPath}");
+            }
             return Task.FromResult(0);
         }
         catch (Exception ex)
@@ -52,5 +64,35 @@ public sealed class ApplyCommand : ICommandRunner
             return Task.FromResult(1);
         }
     }
-}
 
+    private static string ReadTablePossiblyDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+            return File.ReadAllText(path, Encoding.UTF8);
+
+        var files = Directory.EnumerateFiles(path, "*.tsv").OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
+        var sb = new StringBuilder();
+        string? header = null;
+        foreach (var f in files)
+        {
+            using var sr = new StreamReader(f, Encoding.UTF8);
+            var hdr = sr.ReadLine() ?? string.Empty;
+            header ??= hdr; // take header from first file
+            string? line;
+            while ((line = sr.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                sb.AppendLine(line);
+            }
+        }
+        if (header is null) return string.Empty;
+        return header + Environment.NewLine + sb.ToString().TrimEnd();
+    }
+
+    private static bool LooksLikeDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (Directory.Exists(path)) return true;
+        return string.IsNullOrEmpty(Path.GetExtension(path));
+    }
+}

@@ -23,8 +23,7 @@ public sealed class CompositionRoot
         ITableIo tableIo = new TableIo();
         IStatsService stats = new StatsService(tableIo);
         IParsingService parsing = new ParsingService();
-        ITranslateClient translate = new RestTranslateClientAdapter(
-            () => new RestTranslateClient(new HttpClient(), "", null));
+        ITranslateClient? translate = null; // Provided by command when needed; tests can inject fake.
 
         // Commands
         var router = new CommandRouter(
@@ -38,4 +37,3 @@ public sealed class CompositionRoot
         return new CompositionRoot { Router = router };
     }
 }
-

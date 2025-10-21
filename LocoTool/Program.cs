@@ -45,15 +45,20 @@ internal static class Program
         Console.WriteLine("LocTool - extract / translate / apply / all / stats");
         Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  LocTool extract <input.txt> <strings.tsv> [--config path.json] [--delimiter \"#\"|\"\\t\"|\",\"]");
-        Console.WriteLine("  LocTool translate <strings_in.tsv|csv|hash> <strings_out.tsv|csv|hash> [--config path.json] [--glossary path.json] [--delimiter ...] [--price <perM>]");
-        Console.WriteLine("  LocTool apply <input.txt> <strings.tsv|csv|hash> <output.txt> [--apply-empty] [--config path.json] [--delimiter ...]");
+        Console.WriteLine("  LocTool extract <input.txt> <strings.tsv|out_dir> [--config path.json] [--parser hash|hashplus|...] [--delimiter \"#\"|\"\\t\"|\",\"]");
+        Console.WriteLine("  LocTool translate <strings_in.tsv|in_dir> <strings_out.tsv|out_dir> [--config path.json] [--glossary path.json] [--delimiter ...] [--price <perM>]");
+        Console.WriteLine("  LocTool apply <input.txt> <strings.tsv|dir> <output.txt|out_dir> [--apply-empty] [--config path.json] [--delimiter ...]");
         Console.WriteLine("  LocTool all <input.txt> <output.txt> [--config path.json] [--glossary path.json] [--delimiter ...] [--price <perM>]");
         Console.WriteLine("  LocTool stats <strings.tsv|csv|hash> [--config path.json] [--delimiter ...] [--price <perM>]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  --parser <name>   Имя парсера (пример: hash, json, xliff). Если не задан — автоопределение.");
+        Console.WriteLine("  --parser <name>   Имя парсера (hash, hashplus, json, xliff). Если не задан — автоопределение.");
         Console.WriteLine("  --price, --price-per-million   Цена за 1 млн символов (напр. 250.00)");
+        Console.WriteLine();
+        Console.WriteLine("Directory modes:");
+        Console.WriteLine("  extract: если указан каталог как <out_dir> и --parser hashplus — создаёт множество TSV по секциям в каталоге");
+        Console.WriteLine("  translate: если <in_dir> — переводит все *.tsv и пишет в <out_dir>");
+        Console.WriteLine("  apply: если <dir> — склеивает все *.tsv внутри (header+строки); если <out_dir> — пишет выходной файл внутрь");
     }
 }
 
