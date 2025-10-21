@@ -31,6 +31,31 @@ public sealed class ExtractCommand : ICommandRunner
 
         try
         {
+            // Inform user about TM flag on extract; initialize empty cache to make effect visible
+            if (context.OptUseTm || !string.IsNullOrWhiteSpace(context.OptTmPath))
+            {
+                var tmPath = context.OptTmPath ?? cfg.Optimization.TMPath;
+                try
+                {
+                    var dir = Path.GetDirectoryName(tmPath);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    if (!File.Exists(tmPath))
+                    {
+                        File.WriteAllText(tmPath, "{}", Encoding.UTF8);
+                        Console.WriteLine($"[tm] initialized local TM: {tmPath}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[tm] using local TM: {tmPath}");
+                    }
+                    Console.WriteLine("[tm] note: TM is applied during translate/apply, extract does not use it");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[tm] warning: cannot initialize TM at {tmPath}: {ex.Message}");
+                }
+            }
+
             var effectiveParser = context.ParserName ?? cfg.Parsers.Default;
             var table = _parsing.Extract(
                 input,
