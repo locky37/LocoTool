@@ -59,6 +59,13 @@ internal static class Program
         Console.WriteLine("  --batch-cache     Кэширование результатов батчей перевода");
         Console.WriteLine("  --placeholders    Маскирование плейсхолдеров (числа) перед переводом");
         Console.WriteLine("  --hl-review       Экспорт review.tsv (orig_text, mt_suggest, final_text)");
+        Console.WriteLine("  --global-tm on|off          Включить/выключить Global TM, перекрывая конфиг");
+        Console.WriteLine("  --tm-mode append|merge|readonly   Режим записи в GTM");
+        Console.WriteLine("  --tm-namespace <name>       Пространство имён GTM");
+        Console.WriteLine("  --tm-import <file>          Импорт в GTM (json|jsonl|tsv)");
+        Console.WriteLine("  --tm-export <file>          Экспорт из GTM (jsonl|tsv)");
+        Console.WriteLine("  --tm-learn                  Дообучать GTM из текущего перевода");
+        Console.WriteLine("  --tm-priority global|local  Порядок lookup: сначала GTM или local TM");
         Console.WriteLine();
         Console.WriteLine("Directory modes:");
         Console.WriteLine("  extract: если указан каталог как <out_dir> и --parser hashplus — создаёт множество TSV по секциям в каталоге");

@@ -22,6 +22,14 @@ public sealed class CommandContext
     public bool OptBatchCache { get; init; }
     public bool OptPlaceholders { get; init; }
     public bool OptHumanLoop { get; init; }
+    // Global TM
+    public bool? GtmEnabledOverride { get; init; }
+    public string? GtmMode { get; init; } // append|merge|readonly
+    public string? GtmNamespace { get; init; }
+    public string? GtmImport { get; init; }
+    public string? GtmExport { get; init; }
+    public bool GtmLearn { get; init; }
+    public string? GtmPriority { get; init; } // global|local
 
     public static CommandContext FromArgs(string[] args)
     {
@@ -43,6 +51,11 @@ public sealed class CommandContext
                 ppm = x;
         }
 
+        bool? gtmOverride = null;
+        var gtmo = GetOpt("--global-tm");
+        if (!string.IsNullOrWhiteSpace(gtmo))
+            gtmOverride = gtmo.Equals("on", StringComparison.OrdinalIgnoreCase) ? true : gtmo.Equals("off", StringComparison.OrdinalIgnoreCase) ? false : null;
+
         return new CommandContext
         {
             Command = cmd,
@@ -58,7 +71,14 @@ public sealed class CommandContext
             OptTmPath = GetOpt("--tm"),
             OptBatchCache = args.Any(a => a.Equals("--batch-cache", StringComparison.OrdinalIgnoreCase)),
             OptPlaceholders = args.Any(a => a.Equals("--placeholders", StringComparison.OrdinalIgnoreCase)),
-            OptHumanLoop = args.Any(a => a.Equals("--hl-review", StringComparison.OrdinalIgnoreCase))
+            OptHumanLoop = args.Any(a => a.Equals("--hl-review", StringComparison.OrdinalIgnoreCase)),
+            GtmEnabledOverride = gtmOverride,
+            GtmMode = GetOpt("--tm-mode"),
+            GtmNamespace = GetOpt("--tm-namespace"),
+            GtmImport = GetOpt("--tm-import"),
+            GtmExport = GetOpt("--tm-export"),
+            GtmLearn = args.Any(a => a.Equals("--tm-learn", StringComparison.OrdinalIgnoreCase)),
+            GtmPriority = GetOpt("--tm-priority")
         };
     }
 }

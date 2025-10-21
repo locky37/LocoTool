@@ -120,6 +120,18 @@ public sealed class TranslateCommand : ICommandRunner
             ITranslationMemory? tm = null;
             if (context.OptUseTm || cfg.Optimization.UseTM)
                 tm = new LocoTool.Core.Services.JsonTranslationMemory(context.OptTmPath ?? cfg.Optimization.TMPath);
+            // Global TM
+            var gtmEnabled = context.GtmEnabledOverride ?? cfg.GlobalTM.Enabled;
+            IGlobalTranslationMemory? gtm = null;
+            if (gtmEnabled)
+            {
+                var ns = context.GtmNamespace ?? cfg.GlobalTM.Namespace;
+                gtm = new LocoTool.Core.Services.JsonlGlobalTranslationMemory(cfg.GlobalTM.RootPath, ns, cfg.GlobalTM.PreferHumanEdited);
+                if (!string.IsNullOrWhiteSpace(context.GtmImport))
+                    gtm.Import(context.GtmImport);
+                if (!string.IsNullOrWhiteSpace(context.GtmExport))
+                    gtm.Export(context.GtmExport);
+            }
             IBatchCache? cache = null;
             if (context.OptBatchCache || cfg.Optimization.BatchCache)
                 cache = new LocoTool.Core.Services.BatchCache(Path.Combine(Path.GetDirectoryName(outputTable) ?? Environment.CurrentDirectory, "batchcache.json"));
@@ -127,6 +139,7 @@ public sealed class TranslateCommand : ICommandRunner
             // Build list of texts to translate, applying TM and placeholders if enabled
             var toTranslate = new List<int>();
             var masked = new Dictionary<int, string[]>();
+            int gtmHits = 0;
             foreach (var idx in toTranslateIdx)
             {
                 var text = rows[idx].OrigText ?? string.Empty;
@@ -134,6 +147,22 @@ public sealed class TranslateCommand : ICommandRunner
                 {
                     rows[idx] = rows[idx] with { TranslatedText = cached };
                     continue;
+                }
+                if (gtm != null)
+                {
+                    var first = context.GtmPriority;
+                    var preferGlobal = string.Equals(first, "global", StringComparison.OrdinalIgnoreCase);
+                    if (preferGlobal)
+                    {
+                        if (gtm.TryGet(text, cfg.Yandex.DefaultSourceLang, cfg.Yandex.DefaultTargetLang, null, out var hit))
+                        { rows[idx] = rows[idx] with { TranslatedText = hit }; gtmHits++; continue; }
+                    }
+                    else
+                    {
+                        // already checked TM above; now GTM
+                        if (gtm.TryGet(text, cfg.Yandex.DefaultSourceLang, cfg.Yandex.DefaultTargetLang, null, out var hit))
+                        { rows[idx] = rows[idx] with { TranslatedText = hit }; gtmHits++; continue; }
+                    }
                 }
                 if (context.OptPlaceholders || cfg.Optimization.Placeholders)
                 {
@@ -199,6 +228,16 @@ public sealed class TranslateCommand : ICommandRunner
                 }
             }
             tm?.Save();
+            if (gtm != null && (context.GtmMode ?? cfg.GlobalTM.WritePolicy) != "readonly")
+            {
+                foreach (var i in toTranslateIdx)
+                {
+                    var orig = rows[i].OrigText ?? string.Empty;
+                    var tr = rows[i].TranslatedText ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(orig) && !string.IsNullOrWhiteSpace(tr))
+                        gtm.Append(orig, tr, cfg.Yandex.DefaultSourceLang, cfg.Yandex.DefaultTargetLang, 1.0, false);
+                }
+            }
             cache?.Save();
 
             _tableIo.WriteRows(outputTable, delim, rows);
@@ -208,6 +247,8 @@ public sealed class TranslateCommand : ICommandRunner
                 var items = rows.Select(r => (r.OrigText ?? string.Empty, r.TranslatedText ?? string.Empty));
                 new LocoTool.Core.Services.HumanLoopService().ExportReview(reviewPath, items);
             }
+            if (gtm != null)
+                Console.WriteLine($"[gtm] hits: {gtmHits}");
         }
 
         static (string dir, List<string> files) ResolveBatchBySelectedFile(string selectedPath)

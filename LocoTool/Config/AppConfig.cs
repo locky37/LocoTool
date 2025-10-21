@@ -9,6 +9,7 @@ public sealed class AppConfig
     public FileDefaults Files { get; set; } = new();
     public ParsersConfig Parsers { get; set; } = new();
     public OptimizationConfig Optimization { get; set; } = new();
+    public GlobalTmConfig GlobalTM { get; set; } = new();
 
     public static AppConfig Load(string? path = null)
     {
@@ -71,4 +72,15 @@ public sealed class OptimizationConfig
     public bool BatchCache { get; set; } = false;
     public bool HumanLoop { get; set; } = false;
     public bool Placeholders { get; set; } = false;
+}
+
+public sealed class GlobalTmConfig
+{
+    public bool Enabled { get; set; } = false;
+    public string RootPath { get; set; } = "~/.locotool/gtm";
+    public string ShardBy { get; set; } = "langpair";
+    public string WritePolicy { get; set; } = "append"; // append|merge|readonly
+    public string Namespace { get; set; } = "default";
+    public double MinConfidence { get; set; } = 0.85;
+    public bool PreferHumanEdited { get; set; } = true;
 }
