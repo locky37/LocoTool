@@ -59,6 +59,12 @@ internal static class Program
         Console.WriteLine("  extract: если указан каталог как <out_dir> и --parser hashplus — создаёт множество TSV по секциям в каталоге");
         Console.WriteLine("  translate: если <in_dir> — переводит все *.tsv и пишет в <out_dir>");
         Console.WriteLine("  apply: если <dir> — склеивает все *.tsv внутри (header+строки); если <out_dir> — пишет выходной файл внутрь");
+        Console.WriteLine();
+        Console.WriteLine("Файл как якорь для каталога (после extract в каталог):");
+        Console.WriteLine("  translate: LocTool translate out_dir/input+randomname.tsv translated_dir");
+        Console.WriteLine("    — переведёт все файлы out_dir/input+*.tsv и сложит в translated_dir");
+        Console.WriteLine("  apply:     LocTool apply input.txt translated_dir/input+randomname.tsv output.txt --parser hashplus");
+        Console.WriteLine("    — применит склейку всех translated_dir/input+*.tsv и запишет в output.txt");
     }
 }
 

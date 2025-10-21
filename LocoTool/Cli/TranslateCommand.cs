@@ -48,19 +48,46 @@ public sealed class TranslateCommand : ICommandRunner
         }
         else
         {
-            // If output looks like directory intention, create and write inside
-            if (!File.Exists(tableIn) || string.IsNullOrEmpty(Path.GetExtension(tableOut)))
+            // Single file or file-based batch (prefix+tag.tsv -> process same-prefix files)
+            if (File.Exists(tableIn))
             {
-                var outDir = tableOut;
-                Directory.CreateDirectory(outDir);
-                var outPath = Path.Combine(outDir, Path.GetFileName(tableIn));
-                await TranslateOneAsync(tableIn, outPath).ConfigureAwait(false);
-                Console.WriteLine($"[translate] OK -> {outPath}");
+                var (dir, files) = ResolveBatchBySelectedFile(tableIn);
+                if (files.Count > 1 || string.IsNullOrEmpty(Path.GetExtension(tableOut)))
+                {
+                    var outDir = tableOut;
+                    Directory.CreateDirectory(outDir);
+                    foreach (var file in files)
+                    {
+                        var outPath = Path.Combine(outDir, Path.GetFileName(file));
+                        await TranslateOneAsync(file, outPath).ConfigureAwait(false);
+                        Console.WriteLine($"[translate] OK -> {outPath}");
+                    }
+                    return 0;
+                }
+                else
+                {
+                    // Exactly one file selected and output is a file path
+                    await TranslateOneAsync(tableIn, tableOut).ConfigureAwait(false);
+                    Console.WriteLine($"[translate] OK -> {tableOut}");
+                    return 0;
+                }
+            }
+            else
+            {
+                // If output looks like directory intention, create and write inside
+                if (string.IsNullOrEmpty(Path.GetExtension(tableOut)))
+                {
+                    var outDir = tableOut;
+                    Directory.CreateDirectory(outDir);
+                    var outPath = Path.Combine(outDir, Path.GetFileName(tableIn));
+                    await TranslateOneAsync(tableIn, outPath).ConfigureAwait(false);
+                    Console.WriteLine($"[translate] OK -> {outPath}");
+                    return 0;
+                }
+                await TranslateOneAsync(tableIn, tableOut).ConfigureAwait(false);
+                Console.WriteLine($"[translate] OK -> {tableOut}");
                 return 0;
             }
-            await TranslateOneAsync(tableIn, tableOut).ConfigureAwait(false);
-            Console.WriteLine($"[translate] OK -> {tableOut}");
-            return 0;
         }
 
         async Task TranslateOneAsync(string inputTable, string outputTable)
@@ -110,6 +137,21 @@ public sealed class TranslateCommand : ICommandRunner
             await FlushAsync();
 
             _tableIo.WriteRows(outputTable, delim, rows);
+        }
+
+        static (string dir, List<string> files) ResolveBatchBySelectedFile(string selectedPath)
+        {
+            var dir = Path.GetDirectoryName(selectedPath) ?? Environment.CurrentDirectory;
+            var name = Path.GetFileName(selectedPath);
+            var baseName = Path.GetFileNameWithoutExtension(name);
+            var plusIdx = baseName.IndexOf('+');
+            if (plusIdx > 0)
+            {
+                var prefix = baseName[..plusIdx];
+                var all = Directory.EnumerateFiles(dir, prefix + "+*.tsv", SearchOption.TopDirectoryOnly).ToList();
+                if (all.Count > 0) return (dir, all);
+            }
+            return (dir, new List<string> { selectedPath });
         }
     }
 }

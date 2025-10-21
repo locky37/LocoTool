@@ -67,10 +67,23 @@ public sealed class ApplyCommand : ICommandRunner
 
     private static string ReadTablePossiblyDirectory(string path)
     {
+        // If a single file is selected, try to expand to batch by prefix (prefix+*.tsv)
         if (!Directory.Exists(path))
+        {
+            if (File.Exists(path))
+            {
+                var (dir, filesList) = ResolveBatchBySelectedFile(path);
+                return MergeFiles(filesList);
+            }
             return File.ReadAllText(path, Encoding.UTF8);
+        }
 
         var files = Directory.EnumerateFiles(path, "*.tsv").OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
+        return MergeFiles(files);
+    }
+
+    private static string MergeFiles(IEnumerable<string> files)
+    {
         var sb = new StringBuilder();
         string? header = null;
         foreach (var f in files)
@@ -94,5 +107,20 @@ public sealed class ApplyCommand : ICommandRunner
         if (string.IsNullOrWhiteSpace(path)) return false;
         if (Directory.Exists(path)) return true;
         return string.IsNullOrEmpty(Path.GetExtension(path));
+    }
+
+    private static (string dir, List<string> files) ResolveBatchBySelectedFile(string selectedPath)
+    {
+        var dir = Path.GetDirectoryName(selectedPath) ?? Environment.CurrentDirectory;
+        var name = Path.GetFileName(selectedPath);
+        var baseName = Path.GetFileNameWithoutExtension(name);
+        var plusIdx = baseName.IndexOf('+');
+        if (plusIdx > 0)
+        {
+            var prefix = baseName[..plusIdx];
+            var all = Directory.EnumerateFiles(dir, prefix + "+*.tsv", SearchOption.TopDirectoryOnly).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+            if (all.Count > 0) return (dir, all);
+        }
+        return (dir, new List<string> { selectedPath });
     }
 }
