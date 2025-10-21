@@ -204,7 +204,56 @@ public sealed class TranslateCommand : ICommandRunner
                 }
                 else
                 {
-                    translated = await client.TranslateBatchAsync(texts, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang, glossary, false, cancellationToken).ConfigureAwait(false);
+                    if (context.OptBatchCache || cfg.Optimization.BatchJoin)
+                    {
+                        // Concat-join strategy
+                        const string sep = "\u241F"; // unit separator visible char
+                        var joined = new List<string>();
+                        var mapping = new List<List<int>>();
+                        var acc = new List<int>();
+                        var accLen = 0;
+                        for (int j = 0; j < texts.Length; j++)
+                        {
+                            var t = texts[j] ?? string.Empty;
+                            var add = t.Length + (acc.Count == 0 ? 0 : sep.Length);
+                            if (accLen + add > cfg.Optimization.MaxJoinChars && acc.Count > 0)
+                            {
+                                joined.Add(string.Join(sep, acc.Select(ix => texts[ix])));
+                                mapping.Add(new List<int>(acc));
+                                acc.Clear(); accLen = 0;
+                            }
+                            if (t.Length >= cfg.Optimization.MinLenToJoin && (accLen + add) <= cfg.Optimization.MaxJoinChars)
+                            { acc.Add(j); accLen += add; }
+                            else
+                            {
+                                joined.Add(t); mapping.Add(new List<int> { j });
+                            }
+                        }
+                        if (acc.Count > 0) { joined.Add(string.Join(sep, acc.Select(ix => texts[ix]))); mapping.Add(new List<int>(acc)); }
+
+                        var joinedTranslated = await client.TranslateBatchAsync(joined, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang, glossary, false, cancellationToken).ConfigureAwait(false);
+                        // split back
+                        var result = new string[texts.Length];
+                        for (int j = 0; j < mapping.Count; j++)
+                        {
+                            var parts = mapping[j];
+                            if (parts.Count == 1)
+                            {
+                                result[parts[0]] = joinedTranslated[j];
+                            }
+                            else
+                            {
+                                var split = (joinedTranslated[j] ?? string.Empty).Split(sep);
+                                for (int k = 0; k < parts.Count && k < split.Length; k++)
+                                    result[parts[k]] = split[k];
+                            }
+                        }
+                        translated = result;
+                    }
+                    else
+                    {
+                        translated = await client.TranslateBatchAsync(texts, cfg.Yandex.DefaultTargetLang, cfg.Yandex.DefaultSourceLang, glossary, false, cancellationToken).ConfigureAwait(false);
+                    }
                     if (key != null) cache!.Put(key!, translated);
                 }
 

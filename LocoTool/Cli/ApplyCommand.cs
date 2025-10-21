@@ -56,6 +56,39 @@ public sealed class ApplyCommand : ICommandRunner
                 File.WriteAllText(outputPath, output, Encoding.UTF8);
                 Console.WriteLine($"[apply] OK -> {outputPath}");
             }
+            // Human-in-loop GTM learn: import review.tsv (final_text) and append to GTM
+            try
+            {
+                var gtmEnabled = context.GtmEnabledOverride ?? cfg.GlobalTM.Enabled;
+                if (gtmEnabled && (context.GtmLearn || context.OptHumanLoop))
+                {
+                    var dir = Directory.Exists(tablePath) ? tablePath : Path.GetDirectoryName(tablePath) ?? Environment.CurrentDirectory;
+                    var review = Path.Combine(dir, "review.tsv");
+                    if (File.Exists(review))
+                    {
+                        var gtm = new LocoTool.Core.Services.JsonlGlobalTranslationMemory(cfg.GlobalTM.RootPath, cfg.GlobalTM.Namespace, cfg.GlobalTM.PreferHumanEdited);
+                        using var sr = new StreamReader(review, Encoding.UTF8);
+                        var header = (sr.ReadLine() ?? string.Empty).Split('\t');
+                        int iOrig = Array.IndexOf(header, "orig_text");
+                        int iFinal = Array.IndexOf(header, "final_text");
+                        int imported = 0;
+                        string? line;
+                        while ((line = sr.ReadLine()) != null)
+                        {
+                            var c = line.Split('\t');
+                            var orig = iOrig >= 0 && iOrig < c.Length ? c[iOrig] : null;
+                            var fin = iFinal >= 0 && iFinal < c.Length ? c[iFinal] : null;
+                            if (!string.IsNullOrWhiteSpace(orig) && !string.IsNullOrWhiteSpace(fin))
+                            {
+                                gtm.Append(orig!, fin!, cfg.Yandex.DefaultSourceLang, cfg.Yandex.DefaultTargetLang, 1.0, true);
+                                imported++;
+                            }
+                        }
+                        Console.WriteLine($"[gtm] imported {imported} final_text rows from review.tsv");
+                    }
+                }
+            }
+            catch { }
             return Task.FromResult(0);
         }
         catch (Exception ex)

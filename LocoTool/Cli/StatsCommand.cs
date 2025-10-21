@@ -6,8 +6,9 @@ namespace LocoTool.Cli;
 public sealed class StatsCommand : ICommandRunner
 {
     private readonly IStatsService _stats;
+    private readonly IConfigService _config;
 
-    public StatsCommand(IStatsService stats) { _stats = stats; }
+    public StatsCommand(IStatsService stats, IConfigService config) { _stats = stats; _config = config; }
 
     public string Name => "stats";
 
@@ -31,7 +32,15 @@ public sealed class StatsCommand : ICommandRunner
             Console.WriteLine($"[stats] оценка (по символам): ~{exactCost:0.00}");
             Console.WriteLine($"[stats] оценка (по пачкам):  ~{paddedCost:0.00}  (учтено {paddedChars:N0} симв.)");
         }
+        // [gtm] block
+        var cfgRes = _config.Load(context.ConfigPath);
+        if (cfgRes.Success && cfgRes.Value is { GlobalTM.Enabled: true } cfg)
+        {
+            var gtm = new LocoTool.Core.Services.JsonlGlobalTranslationMemory(cfg.GlobalTM.RootPath, cfg.GlobalTM.Namespace, cfg.GlobalTM.PreferHumanEdited);
+            var s = gtm.Stats();
+            Console.WriteLine($"[gtm] hit-rate: {s.HitRate:P1} (hits: {s.Hits:N0} / misses: {s.Misses:N0}) entries: {s.Entries:N0} shards: {s.Shards:N0}");
+        }
+
         return Task.FromResult(0);
     }
 }
-

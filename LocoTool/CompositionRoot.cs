@@ -31,7 +31,7 @@ public sealed class CompositionRoot
             new TranslateCommand(config, glossary, translate, tableIo, stats),
             new ApplyCommand(parsing, config),
             new AllCommand(config, parsing, glossary, translate, tableIo, stats),
-            new StatsCommand(stats)
+            new StatsCommand(stats, config)
         );
 
         return new CompositionRoot { Router = router };
