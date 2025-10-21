@@ -1,10 +1,12 @@
-﻿using CSnakes.Runtime;
+using CSnakes.Runtime;
 using LocoTool.Config;
 using LocoTool.Service;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Globalization;
 using System.Text;
+using LocoTool.Core;
+using LocoTool.Abstractions;
 
 namespace LocoTool;
 
@@ -80,7 +82,29 @@ class Program
                         string input = File.ReadAllText(inputPath, Encoding.UTF8);
                         char delim = ResolveDelimiter(args, defaultDelim: '#');
 
-                        string table = loctool.ExtractStrings(input, delim.ToString());
+                        var pm = new ParserManager();
+                        pm.LoadFromFolder(
+                            Path.Combine(AppContext.BaseDirectory, config.Parsers.Folder),
+                            config.Parsers.Assemblies
+                        );
+
+                        string? parserName = GetOptionValue(args, "--parser") ?? config.Parsers.Default;
+                        string? sample = File.Exists(inputPath) ? File.ReadLines(inputPath).FirstOrDefault() : null;
+                        var parser = pm.Resolve(parserName, inputPath, sample);
+                        if (parser is null)
+                        {
+                            Console.WriteLine("[parsers] Не найден подходящий парсер. Проверь config.Parsers.* и наличие DLL в /parsers");
+                            return 1;
+                        }
+
+                        var options = new ParserOptions
+                        {
+                            TableDelimiter = delim,
+                            ApplyEmpty = args.Any(a => a.Equals("--apply-empty", StringComparison.OrdinalIgnoreCase)),
+                            Extra = (Dictionary<string, string>?)null
+                        };
+
+                        string table = parser.Extract(input, options);
                         File.WriteAllText(tableOut, table, Encoding.UTF8);
                         Console.WriteLine($"[extract] OK -> {tableOut}");
                         return 0;
@@ -121,10 +145,32 @@ class Program
 
                         char delim = ResolveDelimiter(args, defaultDelim: '#');
 
+                        var pm = new ParserManager();
+                        pm.LoadFromFolder(
+                            Path.Combine(AppContext.BaseDirectory, config.Parsers.Folder),
+                            config.Parsers.Assemblies
+                        );
+
+                        string? parserName = GetOptionValue(args, "--parser") ?? config.Parsers.Default;
+                        string? sample = File.Exists(inputPath) ? File.ReadLines(inputPath).FirstOrDefault() : null;
+                        var parser = pm.Resolve(parserName, inputPath, sample);
+                        if (parser is null)
+                        {
+                            Console.WriteLine("[parsers] Не найден подходящий парсер. Проверь config.Parsers.* и наличие DLL в /parsers");
+                            return 1;
+                        }
+
+                        var options = new ParserOptions
+                        {
+                            TableDelimiter = delim,
+                            ApplyEmpty = args.Any(a => a.Equals("--apply-empty", StringComparison.OrdinalIgnoreCase)),
+                            Extra = (Dictionary<string, string>?)null
+                        };
+
                         string input = File.ReadAllText(inputPath, Encoding.UTF8);
                         string tableText = File.ReadAllText(tablePath, Encoding.UTF8);
 
-                        string outputText = loctool.ApplyTranslations(input, tableText, applyEmpty, delim.ToString());
+                        string outputText = parser.Apply(input, tableText, options);
                         File.WriteAllText(outputPath, outputText, Encoding.UTF8);
 
                         Console.WriteLine($"[apply] OK -> {outputPath}");
@@ -143,6 +189,23 @@ class Program
                         string tsv = loctool.ExtractStrings(input); // если делал параметр delimiter — прокинь тут ResolveDelimiter(...)
 
                         // ДО перевода — посчитаем и выведем оценку
+                        {
+                            var pm = new ParserManager();
+                            pm.LoadFromFolder(
+                                Path.Combine(AppContext.BaseDirectory, config.Parsers.Folder),
+                                config.Parsers.Assemblies
+                            );
+                            string? parserName = GetOptionValue(args, "--parser") ?? config.Parsers.Default;
+                            string? sample = File.Exists(inputPath) ? File.ReadLines(inputPath).FirstOrDefault() : null;
+                            var parser = pm.Resolve(parserName, inputPath, sample);
+                            if (parser is null)
+                            {
+                                Console.WriteLine("[parsers] Не найден подходящий парсер. Проверь config.Parsers.* и наличие DLL в /parsers");
+                                return 1;
+                            }
+                            var options = new ParserOptions { TableDelimiter = '\t', ApplyEmpty = false, Extra = (Dictionary<string, string>?)null };
+                            tsv = parser.Extract(input, options);
+                        }
                         var (totalChars, stringsCount) = ComputeStatsFromTsvText(tsv);
                         PrintCostEstimation(totalChars, stringsCount, config.Limits.MaxCharsPerRequest, hasPrice ? pricePerMillion : null);
 
@@ -158,8 +221,23 @@ class Program
                             config.Limits.MaxCharsPerRequest
                         );
 
-                        string outputText = loctool.ApplyTranslations(input, tsvTranslated, applyEmpty: false);
-                        File.WriteAllText(outputPath, outputText, Encoding.UTF8);
+                        {
+                            var pm2 = new ParserManager();
+                            pm2.LoadFromFolder(
+                                Path.Combine(AppContext.BaseDirectory, config.Parsers.Folder),
+                                config.Parsers.Assemblies
+                            );
+                            string? parserName2 = GetOptionValue(args, "--parser") ?? config.Parsers.Default;
+                            string? sample2 = File.Exists(inputPath) ? File.ReadLines(inputPath).FirstOrDefault() : null;
+                            var parser2 = pm2.Resolve(parserName2, inputPath, sample2);
+                            if (parser2 is null)
+                            {
+                                Console.WriteLine("[parsers] Не найден подходящий парсер. Проверь config.Parsers.* и наличие DLL в /parsers");
+                                return 1;
+                            }
+                            string outputText = parser2.Apply(input, tsvTranslated, new ParserOptions { TableDelimiter = '\t', ApplyEmpty = false });
+                            File.WriteAllText(outputPath, outputText, Encoding.UTF8);
+                        }
 
                         Console.WriteLine($"[all] OK -> {outputPath}");
                         return 0;
@@ -517,6 +595,7 @@ class Program
         Console.WriteLine("  LocTool stats <strings.tsv|csv|hash> [--config path.json] [--delimiter ...] [--price <perM>]");
         Console.WriteLine();
         Console.WriteLine("Options:");
+        Console.WriteLine("  --parser <name>   Явно выбрать парсер (например: hash, json, xliff). Если не указано — автодетект.");
         Console.WriteLine("  --price, --price-per-million   Цена за 1 млн символов (вкл. НДС), например 250.00");
     }
 }

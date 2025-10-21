@@ -7,6 +7,7 @@ public sealed class AppConfig
     public YandexConfig Yandex { get; set; } = new();
     public LimitConfig Limits { get; set; } = new();
     public FileDefaults Files { get; set; } = new();
+    public ParsersConfig Parsers { get; set; } = new();
 
     public static AppConfig Load(string? path = null)
     {
@@ -47,4 +48,11 @@ public sealed class FileDefaults
 {
     public string DefaultInput { get; set; } = "input.txt";
     public string DefaultOutput { get; set; } = "output.txt";
+}
+
+public sealed class ParsersConfig
+{
+    public string Folder { get; set; } = "parsers";
+    public List<string>? Assemblies { get; set; }
+    public string? Default { get; set; }
 }

@@ -12,6 +12,12 @@
   </ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\LocoTool.Abstractions\LocoTool.Abstractions.csproj" />
+		<!-- Build plugin project but don't reference its assembly at compile time -->
+		<ProjectReference Include="..\HashDelimited.Parser\HashDelimited.Parser.csproj" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<AdditionalFiles Include="loctool.py" SourceItemType="Python">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</AdditionalFiles>
@@ -28,5 +34,18 @@
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	  </None>
 	</ItemGroup>
-	
+
+  <!-- Copy plugin DLLs into output parsers folder -->
+  <Target Name="CopyParsers" AfterTargets="Build">
+    <PropertyGroup>
+      <ParsersOutDir>$(OutDir)parsers\</ParsersOutDir>
+      <PluginHashDll>$(MSBuildProjectDirectory)\..\HashDelimited.Parser\bin\$(Configuration)\$(TargetFramework)\HashDelimited.Parser.dll</PluginHashDll>
+    </PropertyGroup>
+    <ItemGroup>
+      <PluginFiles Include="$(PluginHashDll)" />
+    </ItemGroup>
+    <MakeDir Directories="$(ParsersOutDir)" />
+    <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(ParsersOutDir)" SkipUnchangedFiles="true" Condition="Exists('$(PluginHashDll)')" />
+  </Target>
+
 </Project>
