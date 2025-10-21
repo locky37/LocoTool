@@ -50,6 +50,7 @@ public sealed class FileDefaults
 {
     public string DefaultInput { get; set; } = "input.txt";
     public string DefaultOutput { get; set; } = "output.txt";
+    public string DefaultDelimiter { get; set; } = "#";
 }
 
 public sealed class ParsersConfig
@@ -72,6 +73,11 @@ public sealed class OptimizationConfig
     public bool BatchCache { get; set; } = false;
     public bool HumanLoop { get; set; } = false;
     public bool Placeholders { get; set; } = false;
+}
+
+public sealed class CompatibilityConfig
+{
+    public bool LegacyTsv { get; set; } = false;
 }
 
 public sealed class GlobalTmConfig

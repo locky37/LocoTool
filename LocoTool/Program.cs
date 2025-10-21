@@ -66,8 +66,8 @@ internal static class Program
         Console.WriteLine("  --tm-export <file>          Экспорт из GTM (jsonl|tsv)");
         Console.WriteLine("  --tm-learn                  Дообучать GTM из текущего перевода");
         Console.WriteLine("  --tm-priority global|local  Порядок lookup: сначала GTM или local TM");
+        Console.WriteLine("  --legacy-tsv      Совместимость: использовать TSV (\\t) вместо HSV (#)");
         Console.WriteLine();
-        Console.WriteLine("Directory modes:");
         Console.WriteLine("  extract: если указан каталог как <out_dir> и --parser hashplus — создаёт множество TSV по секциям в каталоге");
         Console.WriteLine("  translate: если <in_dir> — переводит все *.tsv и пишет в <out_dir>");
         Console.WriteLine("  apply: если <dir> — склеивает все *.tsv внутри (header+строки); если <out_dir> — пишет выходной файл внутрь");
@@ -79,4 +79,5 @@ internal static class Program
         Console.WriteLine("    — применит склейку всех translated_dir/input+*.tsv и запишет в output.txt");
     }
 }
+
 

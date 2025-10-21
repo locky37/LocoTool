@@ -22,6 +22,7 @@ public sealed class CommandContext
     public bool OptBatchCache { get; init; }
     public bool OptPlaceholders { get; init; }
     public bool OptHumanLoop { get; init; }
+    public bool LegacyTsv { get; init; }
     // Global TM
     public bool? GtmEnabledOverride { get; init; }
     public string? GtmMode { get; init; } // append|merge|readonly
@@ -65,7 +66,8 @@ public sealed class CommandContext
             ParserName = GetOpt("--parser"),
             ApplyEmpty = args.Any(a => a.Equals("--apply-empty", StringComparison.OrdinalIgnoreCase)),
             PricePerMillion = ppm,
-            Delimiter = delim,
+            Delimiter = (args.Any(a => a.Equals("--legacy-tsv", StringComparison.OrdinalIgnoreCase)) ? '\t' : delim),
+            LegacyTsv = args.Any(a => a.Equals("--legacy-tsv", StringComparison.OrdinalIgnoreCase)),
             OptDedup = args.Any(a => a.Equals("--dedup", StringComparison.OrdinalIgnoreCase)),
             OptUseTm = args.Any(a => a.Equals("--tm", StringComparison.OrdinalIgnoreCase)) || !string.IsNullOrEmpty(GetOpt("--tm")),
             OptTmPath = GetOpt("--tm"),
