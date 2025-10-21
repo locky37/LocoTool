@@ -43,6 +43,9 @@ public sealed class ExtractCommand : ICommandRunner
                 cfg.Parsers.Assemblies);
             var isHashPlus = string.Equals(effectiveParser, "hashplus", StringComparison.OrdinalIgnoreCase);
             var outLooksDir = LooksLikeDirectory(tableOut);
+            (int total, int unique) dedupAllStats = (total: 0, unique: 0);
+            var aggregatedMap = new List<string>();
+
             if (isHashPlus)
             {
                 var groups = GroupByRecordId(table, context.Delimiter);
@@ -55,8 +58,26 @@ public sealed class ExtractCommand : ICommandRunner
                     foreach (var (tag, content) in groups)
                     {
                         var outPath = Path.Combine(dir, $"{prefix}+{tag}{ext}");
-                        File.WriteAllText(outPath, content, Encoding.UTF8);
+                        if (context.OptDedup || cfg.Optimization.Deduplicate)
+                        {
+                            var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(content, context.Delimiter);
+                            File.WriteAllText(outPath, uniqueContent, Encoding.UTF8);
+                            dedupAllStats.total += stats.total; dedupAllStats.unique += stats.unique;
+                            aggregatedMap.AddRange(mapLines.Select(l => $"{prefix}+{tag}\t" + l));
+                            Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
+                        }
+                        else
+                        {
+                            File.WriteAllText(outPath, content, Encoding.UTF8);
+                        }
                         Console.WriteLine($"[extract] OK -> {outPath}");
+                    }
+                    // Write aggregated map and stats in dir
+                    if ((context.OptDedup || cfg.Optimization.Deduplicate) && aggregatedMap.Count > 0)
+                    {
+                        var mapPath = Path.Combine(dir, "dedup_map.tsv");
+                        File.WriteAllLines(mapPath, new[] { "file\toriginal_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(aggregatedMap));
+                        WriteDedupStatsJson(dir, dedupAllStats.total, dedupAllStats.unique);
                     }
                 }
                 else
@@ -68,8 +89,25 @@ public sealed class ExtractCommand : ICommandRunner
                     foreach (var (tag, content) in groups)
                     {
                         var outPath = Path.Combine(dir, $"{baseName}+{tag}{ext}");
-                        File.WriteAllText(outPath, content, Encoding.UTF8);
+                        if (context.OptDedup || cfg.Optimization.Deduplicate)
+                        {
+                            var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(content, context.Delimiter);
+                            File.WriteAllText(outPath, uniqueContent, Encoding.UTF8);
+                            dedupAllStats.total += stats.total; dedupAllStats.unique += stats.unique;
+                            aggregatedMap.AddRange(mapLines.Select(l => $"{baseName}+{tag}\t" + l));
+                            Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
+                        }
+                        else
+                        {
+                            File.WriteAllText(outPath, content, Encoding.UTF8);
+                        }
                         Console.WriteLine($"[extract] OK -> {outPath}");
+                    }
+                    if ((context.OptDedup || cfg.Optimization.Deduplicate) && aggregatedMap.Count > 0)
+                    {
+                        var mapPath = Path.Combine(dir, "dedup_map.tsv");
+                        File.WriteAllLines(mapPath, new[] { "file\toriginal_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(aggregatedMap));
+                        WriteDedupStatsJson(dir, dedupAllStats.total, dedupAllStats.unique);
                     }
                 }
             }
@@ -81,12 +119,37 @@ public sealed class ExtractCommand : ICommandRunner
                     Directory.CreateDirectory(tableOut);
                     var name = Path.GetFileNameWithoutExtension(inputPath);
                     var outPath = Path.Combine(tableOut, $"{name}.tsv");
-                    File.WriteAllText(outPath, table, Encoding.UTF8);
+                    if (context.OptDedup || cfg.Optimization.Deduplicate)
+                    {
+                        var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(table, context.Delimiter);
+                        File.WriteAllText(outPath, uniqueContent, Encoding.UTF8);
+                        var mapPath = Path.Combine(tableOut, "dedup_map.tsv");
+                        File.WriteAllLines(mapPath, new[] { "original_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(mapLines));
+                        WriteDedupStatsJson(tableOut, stats.total, stats.unique);
+                        Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
+                    }
+                    else
+                    {
+                        File.WriteAllText(outPath, table, Encoding.UTF8);
+                    }
                     Console.WriteLine($"[extract] OK -> {outPath}");
                 }
                 else
                 {
-                    File.WriteAllText(tableOut, table, Encoding.UTF8);
+                    if (context.OptDedup || cfg.Optimization.Deduplicate)
+                    {
+                        var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(table, context.Delimiter);
+                        File.WriteAllText(tableOut, uniqueContent, Encoding.UTF8);
+                        var dir = Path.GetDirectoryName(tableOut) ?? Environment.CurrentDirectory;
+                        var mapPath = Path.Combine(dir, "dedup_map.tsv");
+                        File.WriteAllLines(mapPath, new[] { "original_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(mapLines));
+                        WriteDedupStatsJson(dir, stats.total, stats.unique);
+                        Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
+                    }
+                    else
+                    {
+                        File.WriteAllText(tableOut, table, Encoding.UTF8);
+                    }
                     Console.WriteLine($"[extract] OK -> {tableOut}");
                 }
             }
@@ -131,5 +194,67 @@ public sealed class ExtractCommand : ICommandRunner
         if (Directory.Exists(path)) return true;
         // Heuristic: no extension -> likely directory intention
         return string.IsNullOrEmpty(Path.GetExtension(path));
+    }
+
+    private static (string uniqueContent, List<string> mapLines, (int total, int unique) stats) BuildUniqueAndMap(string tsv, char delim)
+    {
+        var lines = tsv.Split('\n');
+        if (lines.Length == 0) return (tsv, new List<string>(), (0,0));
+        var header = lines[0].TrimEnd('\r');
+        var hdr = header.Split(delim);
+        int iLine = Array.IndexOf(hdr, "original_line_no");
+        int iField = Array.IndexOf(hdr, "field_index");
+        int iRec = Array.IndexOf(hdr, "record_id_guess");
+        int iOrig = Array.IndexOf(hdr, "orig_text");
+
+        var rows = new List<string[]>();
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var l = lines[i].TrimEnd('\r');
+            if (string.IsNullOrWhiteSpace(l)) continue;
+            rows.Add(l.Split(delim));
+        }
+        var candidates = rows.Where(r => iOrig >= 0 && iOrig < r.Length && !string.IsNullOrWhiteSpace(r[iOrig])).ToList();
+        var texts = candidates.Select(r => r[iOrig] ?? string.Empty).ToList();
+
+        var dedup = new LocoTool.Core.Services.Deduplicator();
+        var (uniqueList, map) = dedup.Deduplicate(texts);
+
+        // Build map lines and unique rows
+        var firstIndexForUniq = new int[uniqueList.Count];
+        Array.Fill(firstIndexForUniq, -1);
+        var mapLines = new List<string>();
+        for (int idx = 0; idx < candidates.Count; idx++)
+        {
+            var uniq = map[idx];
+            if (firstIndexForUniq[uniq] == -1) firstIndexForUniq[uniq] = idx;
+            var r = candidates[idx];
+            string get(int ii) => ii >= 0 && ii < r.Length ? r[ii] : string.Empty;
+            mapLines.Add(string.Join(delim, new[] { get(iLine), get(iField), get(iRec), get(iOrig), uniq.ToString() }));
+        }
+
+        var uniqueRows = new List<string> { header };
+        for (int u = 0; u < uniqueList.Count; u++)
+        {
+            var r = candidates[firstIndexForUniq[u]];
+            // ensure translated_text column exists; leave empty
+            if (r.Length < hdr.Length) Array.Resize(ref r, hdr.Length);
+            if (r.Length >= hdr.Length) r[hdr.Length - 1] = string.Empty;
+            uniqueRows.Add(string.Join(delim, r));
+        }
+        var uniqueContent = string.Join(Environment.NewLine, uniqueRows);
+        return (uniqueContent, mapLines, (texts.Count, uniqueList.Count));
+    }
+
+    private static void WriteDedupStatsJson(string dir, int total, int unique)
+    {
+        try
+        {
+            var duplicates = Math.Max(0, total - unique);
+            var rate = total > 0 ? (duplicates / (double)total) : 0.0;
+            var json = $"{{ \"total\": {total}, \"unique\": {unique}, \"duplicates\": {duplicates}, \"dedupRate\": {rate:0.##} }}";
+            File.WriteAllText(Path.Combine(dir, "dedup_stats.json"), json);
+        }
+        catch { }
     }
 }

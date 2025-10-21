@@ -30,7 +30,7 @@ public sealed class CompositionRoot
             new ExtractCommand(parsing, tableIo, config),
             new TranslateCommand(config, glossary, translate, tableIo, stats),
             new ApplyCommand(parsing, config),
-            new AllCommand(config, parsing, glossary, translate, tableIo, stats),
+            new AllCommand(config, parsing, glossary, translate!, tableIo, stats),
             new StatsCommand(stats, config)
         );
 

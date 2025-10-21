@@ -27,6 +27,7 @@ public sealed class ApplyCommand : ICommandRunner
 
         string input = File.ReadAllText(inputPath, Encoding.UTF8);
         string tableText = ReadTablePossiblyDirectory(tablePath);
+        tableText = TryExpandUsingDedupMap(tablePath, tableText, context.Delimiter);
         string? sample = File.Exists(inputPath) ? File.ReadLines(inputPath).FirstOrDefault() : null;
 
         try
@@ -155,5 +156,52 @@ public sealed class ApplyCommand : ICommandRunner
             if (all.Count > 0) return (dir, all);
         }
         return (dir, new List<string> { selectedPath });
+    }
+
+    private static string TryExpandUsingDedupMap(string tablePath, string currentTableText, char delim)
+    {
+        var dir = Directory.Exists(tablePath) ? tablePath : Path.GetDirectoryName(tablePath) ?? Environment.CurrentDirectory;
+        var mapPath = Path.Combine(dir, "dedup_map.tsv");
+        if (!File.Exists(mapPath)) return currentTableText;
+
+        // Load unique translations from currentTableText (merged .tsv contents)
+        var lines = currentTableText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0) return currentTableText;
+        var header = lines[0].Split('\t');
+        int iOrig = Array.IndexOf(header, "orig_text");
+        int iTr = Array.IndexOf(header, "translated_text");
+        // Build list of unique translated texts in order
+        var uniqueTrans = new List<string>();
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var c = lines[i].Split('\t');
+            if (iTr >= 0 && iTr < c.Length)
+                uniqueTrans.Add(c[iTr]);
+        }
+
+        // Build expanded table rows based on map
+        var outRows = new List<string>();
+        outRows.Add(string.Join('\t', new[] { "original_line_no", "field_index", "record_id_guess", "orig_text", "translated_text" }));
+        using (var sr = new StreamReader(mapPath, Encoding.UTF8))
+        {
+            var mapHeader = (sr.ReadLine() ?? string.Empty);
+            var mh = mapHeader.Split('\t');
+            int baseShift = mh[0] == "file" ? 1 : 0;
+            int iLine = baseShift + 0;
+            int iField = baseShift + 1;
+            int iRec = baseShift + 2;
+            int iMO = baseShift + 3;
+            int iIdx = baseShift + 4;
+            string? row;
+            while ((row = sr.ReadLine()) != null)
+            {
+                var c = row.Split('\t');
+                var uidx = int.Parse(c[iIdx]);
+                var tr = (uidx >= 0 && uidx < uniqueTrans.Count) ? uniqueTrans[uidx] : string.Empty;
+                outRows.Add(string.Join('\t', new[] { c[iLine], c[iField], c[iRec], c[iMO], tr }));
+            }
+        }
+        Console.WriteLine($"[export] Восстановлено: {outRows.Count - 1} строк, уникальных: {uniqueTrans.Count}");
+        return string.Join(Environment.NewLine, outRows);
     }
 }
