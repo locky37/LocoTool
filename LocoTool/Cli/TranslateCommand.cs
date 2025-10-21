@@ -187,9 +187,35 @@ public sealed class TranslateCommand : ICommandRunner
                 }
             }
 
-            var (unique, map) = (context.OptDedup || cfg.Optimization.Deduplicate)
+            var dedupEnabled = (context.OptDedup || cfg.Optimization.Deduplicate);
+            var (unique, map) = dedupEnabled
                 ? _dedup.Deduplicate(textsToTranslate)
                 : (textsToTranslate, Enumerable.Range(0, textsToTranslate.Count).ToArray());
+
+            if (dedupEnabled)
+            {
+                var total = textsToTranslate.Count;
+                var uniqueCount = unique.Count;
+                var saved = Math.Max(0, total - uniqueCount);
+                var pct = total > 0 ? (saved / (double)total) : 0.0;
+                Console.WriteLine($"[dedup] unique: {uniqueCount} / total: {total} (saved {pct:P1})");
+
+                try
+                {
+                    var outDir = Path.GetDirectoryName(outputTable) ?? Environment.CurrentDirectory;
+                    var baseName = Path.GetFileNameWithoutExtension(outputTable);
+                    var statsPath = Path.Combine(outDir, baseName + ".dedup.txt");
+                    var lines = new List<string>
+                    {
+                        $"total={total}",
+                        $"unique={uniqueCount}",
+                        $"saved={saved}",
+                        $"saved_pct={(pct*100.0):0.0}"
+                    };
+                    File.WriteAllLines(statsPath, lines);
+                }
+                catch { /* ignore IO issues for stats */ }
+            }
 
             // Plan batches
             var plannedBatches = _planner.Plan(unique, cfg.Limits.MaxCharsPerRequest);
