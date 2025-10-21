@@ -37,3 +37,4 @@ public sealed class CompositionRoot
         return new CompositionRoot { Router = router };
     }
 }
+

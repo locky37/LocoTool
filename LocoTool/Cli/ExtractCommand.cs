@@ -60,10 +60,10 @@ public sealed class ExtractCommand : ICommandRunner
                         var outPath = Path.Combine(dir, $"{prefix}+{tag}{ext}");
                         if (context.OptDedup || cfg.Optimization.Deduplicate)
                         {
-                            var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(content, context.Delimiter);
+                            var (uniqueContent, mapRows, stats) = BuildUniqueAndMap(content, context.Delimiter);
                             File.WriteAllText(outPath, uniqueContent, Encoding.UTF8);
                             dedupAllStats.total += stats.total; dedupAllStats.unique += stats.unique;
-                            aggregatedMap.AddRange(mapLines.Select(l => $"{prefix}+{tag}\t" + l));
+                            foreach (var row in mapRows) { var withFile = new[] { $"{prefix}+{tag}" }.Concat(row).ToArray(); var line = context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(withFile, '#') : string.Join('\t', withFile); aggregatedMap.Add(line); }
                             Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
                         }
                         else
@@ -75,8 +75,8 @@ public sealed class ExtractCommand : ICommandRunner
                     // Write aggregated map and stats in dir
                     if ((context.OptDedup || cfg.Optimization.Deduplicate) && aggregatedMap.Count > 0)
                     {
-                        var mapPath = Path.Combine(dir, "dedup_map.tsv");
-                        File.WriteAllLines(mapPath, new[] { "file\toriginal_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(aggregatedMap));
+                        var mapPath = Path.Combine(dir, context.Delimiter == '#' ? "dedup_map.hash" : "dedup_map.tsv");
+                        { var headerFields = new[] { "file", "original_line_no", "field_index", "record_id_guess", "orig_text", "unique_index" }; var headerLine = context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(headerFields, '#') : string.Join('\t', headerFields); File.WriteAllLines(mapPath, new[] { headerLine }.Concat(aggregatedMap), Encoding.UTF8); }
                         WriteDedupStatsJson(dir, dedupAllStats.total, dedupAllStats.unique);
                     }
                 }
@@ -91,10 +91,10 @@ public sealed class ExtractCommand : ICommandRunner
                         var outPath = Path.Combine(dir, $"{baseName}+{tag}{ext}");
                         if (context.OptDedup || cfg.Optimization.Deduplicate)
                         {
-                            var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(content, context.Delimiter);
+                            var (uniqueContent, mapRows, stats) = BuildUniqueAndMap(content, context.Delimiter);
                             File.WriteAllText(outPath, uniqueContent, Encoding.UTF8);
                             dedupAllStats.total += stats.total; dedupAllStats.unique += stats.unique;
-                            aggregatedMap.AddRange(mapLines.Select(l => $"{baseName}+{tag}\t" + l));
+                            foreach (var row in mapRows) { var withFile = new[] { $"{baseName}+{tag}" }.Concat(row).ToArray(); var line = context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(withFile, '#') : string.Join('\t', withFile); aggregatedMap.Add(line); }
                             Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
                         }
                         else
@@ -105,8 +105,8 @@ public sealed class ExtractCommand : ICommandRunner
                     }
                     if ((context.OptDedup || cfg.Optimization.Deduplicate) && aggregatedMap.Count > 0)
                     {
-                        var mapPath = Path.Combine(dir, "dedup_map.tsv");
-                        File.WriteAllLines(mapPath, new[] { "file\toriginal_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(aggregatedMap));
+                        var mapPath = Path.Combine(dir, context.Delimiter == '#' ? "dedup_map.hash" : "dedup_map.tsv");
+                        { var headerFields = new[] { "file", "original_line_no", "field_index", "record_id_guess", "orig_text", "unique_index" }; var headerLine = context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(headerFields, '#') : string.Join('\t', headerFields); File.WriteAllLines(mapPath, new[] { headerLine }.Concat(aggregatedMap), Encoding.UTF8); }
                         WriteDedupStatsJson(dir, dedupAllStats.total, dedupAllStats.unique);
                     }
                 }
@@ -121,10 +121,10 @@ public sealed class ExtractCommand : ICommandRunner
                     var outPath = Path.Combine(tableOut, $"{name}.tsv");
                     if (context.OptDedup || cfg.Optimization.Deduplicate)
                     {
-                        var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(table, context.Delimiter);
+                        var (uniqueContent, mapRows, stats) = BuildUniqueAndMap(table, context.Delimiter);
                         File.WriteAllText(outPath, uniqueContent, Encoding.UTF8);
-                        var mapPath = Path.Combine(tableOut, "dedup_map.tsv");
-                        File.WriteAllLines(mapPath, new[] { "original_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(mapLines));
+                        var mapPath = Path.Combine(tableOut, context.Delimiter == '#' ? "dedup_map.hash" : "dedup_map.tsv");
+                        { var headerFields = new[] { "original_line_no", "field_index", "record_id_guess", "orig_text", "unique_index" }; var headerLine = context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(headerFields, '#') : string.Join('\t', headerFields); var lines = mapRows.Select(r => context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(r, '#') : string.Join('\t', r)); File.WriteAllLines(mapPath, new[] { headerLine }.Concat(lines), Encoding.UTF8); }
                         WriteDedupStatsJson(tableOut, stats.total, stats.unique);
                         Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
                     }
@@ -138,11 +138,11 @@ public sealed class ExtractCommand : ICommandRunner
                 {
                     if (context.OptDedup || cfg.Optimization.Deduplicate)
                     {
-                        var (uniqueContent, mapLines, stats) = BuildUniqueAndMap(table, context.Delimiter);
+                        var (uniqueContent, mapRows, stats) = BuildUniqueAndMap(table, context.Delimiter);
                         File.WriteAllText(tableOut, uniqueContent, Encoding.UTF8);
                         var dir = Path.GetDirectoryName(tableOut) ?? Environment.CurrentDirectory;
-                        var mapPath = Path.Combine(dir, "dedup_map.tsv");
-                        File.WriteAllLines(mapPath, new[] { "original_line_no\tfield_index\trecord_id_guess\torig_text\tunique_index" }.Concat(mapLines));
+                        var mapPath = Path.Combine(dir, context.Delimiter == '#' ? "dedup_map.hash" : "dedup_map.tsv");
+                        { var headerFields = new[] { "original_line_no", "field_index", "record_id_guess", "orig_text", "unique_index" }; var headerLine = context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(headerFields, '#') : string.Join('\t', headerFields); var lines = mapRows.Select(r => context.Delimiter == '#' ? LocoTool.Core.Services.HashCsv.WriteRow(r, '#') : string.Join('\t', r)); File.WriteAllLines(mapPath, new[] { headerLine }.Concat(lines), Encoding.UTF8); }
                         WriteDedupStatsJson(dir, stats.total, stats.unique);
                         Console.WriteLine($"[dedup] Уникальных: {stats.unique} / Повторов: {stats.total - stats.unique} ({((stats.total - stats.unique)/(double)Math.Max(1,stats.total)):P0})");
                     }
@@ -196,10 +196,10 @@ public sealed class ExtractCommand : ICommandRunner
         return string.IsNullOrEmpty(Path.GetExtension(path));
     }
 
-    private static (string uniqueContent, List<string> mapLines, (int total, int unique) stats) BuildUniqueAndMap(string tsv, char delim)
+    private static (string uniqueContent, List<string[]> mapRows, (int total, int unique) stats) BuildUniqueAndMap(string tsv, char delim)
     {
         var lines = tsv.Split('\n');
-        if (lines.Length == 0) return (tsv, new List<string>(), (0,0));
+        if (lines.Length == 0) return (tsv, new List<string[]>(), (0,0));
         var header = lines[0].TrimEnd('\r');
         var hdr = header.Split(delim);
         int iLine = Array.IndexOf(hdr, "original_line_no");
@@ -223,14 +223,14 @@ public sealed class ExtractCommand : ICommandRunner
         // Build map lines and unique rows
         var firstIndexForUniq = new int[uniqueList.Count];
         Array.Fill(firstIndexForUniq, -1);
-        var mapLines = new List<string>();
+        var mapRows = new List<string[]>();
         for (int idx = 0; idx < candidates.Count; idx++)
         {
             var uniq = map[idx];
             if (firstIndexForUniq[uniq] == -1) firstIndexForUniq[uniq] = idx;
             var r = candidates[idx];
             string get(int ii) => ii >= 0 && ii < r.Length ? r[ii] : string.Empty;
-            mapLines.Add(string.Join(delim, new[] { get(iLine), get(iField), get(iRec), get(iOrig), uniq.ToString() }));
+            mapRows.Add(new[] { get(iLine), get(iField), get(iRec), get(iOrig), uniq.ToString() });
         }
 
         var uniqueRows = new List<string> { header };
@@ -243,7 +243,7 @@ public sealed class ExtractCommand : ICommandRunner
             uniqueRows.Add(string.Join(delim, r));
         }
         var uniqueContent = string.Join(Environment.NewLine, uniqueRows);
-        return (uniqueContent, mapLines, (texts.Count, uniqueList.Count));
+        return (uniqueContent, mapRows, (texts.Count, uniqueList.Count));
     }
 
     private static void WriteDedupStatsJson(string dir, int total, int unique)
@@ -258,3 +258,12 @@ public sealed class ExtractCommand : ICommandRunner
         catch { }
     }
 }
+
+
+
+
+
+
+
+
+
