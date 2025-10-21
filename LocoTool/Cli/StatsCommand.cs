@@ -12,28 +12,49 @@ public sealed class StatsCommand : ICommandRunner
 
     public string Name => "stats";
 
-    public Task<int> RunAsync(CommandContext context, CancellationToken cancellationToken)
-    {
-        // stats <strings.tsv|csv|hash> [--delimiter ...] [--price ...]
-        string tableIn = context.Args.Length > 1 ? context.Args[1] : "strings.tsv";
-        var (totalChars, stringsCount) = _stats.ComputeFromTable(tableIn, context.Delimiter);
+    public Task<int> RunAsync(CommandContext context, CancellationToken cancellationToken)    {
+        // stats <strings.hash|csv|tsv|dir> [--delimiter ...] [--price ...]
+        string input = context.Args.Length > 1 ? context.Args[1] : "strings.tsv";
+
+        long totalChars = 0;
+        int stringsCount = 0;
+        int filesCount = 0;
+
+        if (Directory.Exists(input))
+        {
+            foreach (var pat in new[] { "*.hash", "*.tsv", "*.csv" })
+            {
+                foreach (var file in Directory.EnumerateFiles(input, pat, SearchOption.TopDirectoryOnly))
+                {
+                    var (t, s) = _stats.ComputeFromTable(file, context.Delimiter);
+                    totalChars += t; stringsCount += s; filesCount++;
+                }
+            }
+            Console.WriteLine($"[stats] источников: {filesCount}");
+        }
+        else
+        {
+            var (t, s) = _stats.ComputeFromTable(input, context.Delimiter);
+            totalChars = t; stringsCount = s; filesCount = 1;
+        }
 
         Console.WriteLine($"[stats] строк к переводу: {stringsCount}");
         Console.WriteLine($"[stats] всего символов: {totalChars:N0}");
 
+        var cfgRes = _config.Load(context.ConfigPath);
+        int maxPer = (cfgRes.Success && cfgRes.Value is not null) ? cfgRes.Value.Limits.MaxCharsPerRequest : 10000;
+
         var (batches, exactCost, paddedCost, paddedChars) = _stats.EstimateCost(
             totalChars,
-            maxCharsPerRequest: 10000, // default; real value is printed by All/Translate via config
+            maxCharsPerRequest: maxPer,
             pricePerMillion: context.PricePerMillion);
 
-        Console.WriteLine($"[stats] пачек по 10000 симв.: {batches:N0}");
+        Console.WriteLine($"[stats] пачек по {maxPer} симв.: {batches:N0}");
         if (exactCost is not null && paddedCost is not null)
         {
             Console.WriteLine($"[stats] оценка (по символам): ~{exactCost:0.00}");
             Console.WriteLine($"[stats] оценка (по пачкам):  ~{paddedCost:0.00}  (учтено {paddedChars:N0} симв.)");
         }
-        // [gtm] block
-        var cfgRes = _config.Load(context.ConfigPath);
         if (cfgRes.Success && cfgRes.Value is { GlobalTM.Enabled: true } cfg)
         {
             var gtm = new LocoTool.Core.Services.JsonlGlobalTranslationMemory(cfg.GlobalTM.RootPath, cfg.GlobalTM.Namespace, cfg.GlobalTM.PreferHumanEdited);
@@ -42,5 +63,4 @@ public sealed class StatsCommand : ICommandRunner
         }
 
         return Task.FromResult(0);
-    }
-}
+    }}
